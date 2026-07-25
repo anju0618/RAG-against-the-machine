@@ -5,8 +5,8 @@ from pydantic import BaseModel, Field
 
 class MinimalSource(BaseModel):
     """
-    検索で見つけてきた「根拠（ソーステキスト）」の場所を記録するモデル。
-    どのファイルの、何文字目から何文字目までを切り取ってきたかを厳密に定義します。
+    検索で見つけてきたソーステキストの場所を記録するモデル。
+    どのファイルの、何文字目から何文字目までを切り取ってきたかを定義
     """
     # コーパス内のファイルパス。評価時は一言一句一致している必要があります。
     # 例: "data/raw/vllm-0.10.1/docs/features/lora.md"
@@ -29,7 +29,7 @@ class UnansweredQuestion(BaseModel):
 class AnsweredQuestion(UnansweredQuestion):
     """
     AIが回答し終わった「質問と回答のセット」を表すモデル。
-    UnansweredQuestionを継承しているため、question_idとquestionも自動的に含まれます。
+    UnansweredQuestionを継承しているため、question_idとquestionも含まれます
     """
     sources: List[MinimalSource]  # 回答の根拠として使ったソース（証拠）のリスト
     answer: str  # Qwen3-0.6BなどのAIが生成した回答のテキスト
@@ -47,7 +47,7 @@ class RagDataset(BaseModel):
 class MinimalSearchResults(BaseModel):
     """
     検索（Retrieval）フェーズの結果を表すモデル。
-    ある質問に対して、AIに見せるためのどのソース（根拠）を引っ張ってきたかを記録します。
+    ある質問に対して、AIに見せるためのどのソースを引っ張ってきたかを記録します。
     """
     question_id: str  # どの質問に対する検索結果か
     question: str     # 質問のテキスト本体
@@ -57,15 +57,15 @@ class MinimalSearchResults(BaseModel):
 class MinimalAnswer(MinimalSearchResults):
     """
     生成（Generation）フェーズの結果を表すモデル。
-    検索結果（MinimalSearchResults）に加えて、最終的にAIが生成した回答を持ちます。
+    検索結果（MinimalSearchResults）に加えて、最終的にAIが生成した回答を保持
     """
     answer: str  # 抽出したソースをもとにAIが生成した回答
 
 
 class StudentSearchResults(BaseModel):
     """
-    Moulinette（自動採点システム）に「検索結果」として提出するための最終フォーマット。
-    CLIで `search_dataset` コマンドを実行したときに出力するJSONの型です。
+    Moulinetteに「検索結果」として提出するための最終フォーマット。
+    CLIで `search_dataset` コマンドを実行したときに出力するJSONの型
     """
     search_results: List[MinimalSearchResults]  # 全質問に対する検索結果のリスト
     k: int  # 質問1つにつき、最大で何件のソースを検索したか（例: トップ10件なら 10）
@@ -73,8 +73,8 @@ class StudentSearchResults(BaseModel):
 
 class StudentSearchResultsAndAnswer(BaseModel):
     """
-    Moulinette（自動採点システム）に「検索結果＋回答」として提出するための最終フォーマット。
-    CLIで `answer_dataset` コマンドを実行したときに出力するJSONの型です。
+    Moulinetteに「検索結果＋回答」として提出するための最終フォーマット。
+    CLIで `answer_dataset` コマンドを実行したときに出力するJSONの型
     """
     search_results: List[MinimalAnswer]  # 全質問に対する検索結果＋回答のリスト
     k: int  # 検索件数上限

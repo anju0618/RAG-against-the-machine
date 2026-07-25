@@ -13,3 +13,10 @@ class Indexer:
         self.processed_dir = Path("data/processed")
         self.chunks: List[Dict[str, Any]] = []
         self.bm25: BM250kapi = None
+
+    def chunk_python_code(self, text: str, file_path: str) -> List[Dict[str, Any]]:
+        """
+        pythonコード用のチャンキング戦略
+        単純な文字数分割ではなく、関数やクラスの定義など、行単位での分割を意識しつつ
+        max_chunk_sizeを超えないように結合
+        """
