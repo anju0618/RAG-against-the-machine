@@ -1,1 +1,47 @@
-.venv
+# =========================
+# Python & Environment
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.python-version
+
+# =========================
+# Testing & Type Checking
+# =========================
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# =========================
+# Project Specific (Data & Outputs)
+# =========================
+# 評価時に自動生成されるため、大容量データや出力結果はコミットしない
+data/raw/*
+data/processed/*
+data/output/*
+
+# ただし、ディレクトリ構造自体はGitに追跡させるために .gitkeep は除外する
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/output/.gitkeep
+
+# =========================
+# Distribution / Packaging
+# =========================
+*.zip
+*.tar.gz
+*.pdf
+
+# =========================
+# OS & IDE
+# =========================
+.DS_Store
+.vscode/
+.idea/
+*.swp
