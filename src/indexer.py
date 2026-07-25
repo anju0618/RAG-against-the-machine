@@ -20,3 +20,47 @@ class Indexer:
         単純な文字数分割ではなく、関数やクラスの定義など、行単位での分割を意識しつつ
         max_chunk_sizeを超えないように結合
         """
+        chnks = []
+        lines = text.split('\n')
+        current_chunk = ""
+        start_idx = 0
+        current_idx = 0
+
+        for line in lines:
+            line_len = len(line) + 1 # +1 for new line
+            if len(current_chunk) + line_len > self.max_chunk_size and current_chunk:
+                chunks.append({
+                    "file_path": str(fule_path),
+                    "first_character_index": start_idx,
+                    "last_character_index": start_idx + len(current_chunk) - 1,
+                    "text": current_chunk  
+                })
+                start_idx += len(current_chunk)
+                current_chunk = line + "\n"
+                current_idx += line_len
+            else:
+                current_chunk += line + "\n"
+                current_idx += line_len
+
+            if current_chunk:
+                chunks.append({
+                    "file_path": str(file_path),
+                    "first_character_index": start_idx,
+                    "last_character_index": start_idx + len(current_chunk) - 1,
+                    "text": current_chunk
+                })
+            return self.chunks
+
+    def chunk_markdown_text(self, text: str, file_path: str) -> List[Dict[str, Any]]:
+        """
+        Markdown/テキスト用のチャンキング戦略。
+        段落（連続する改行）を意識して分割し、文脈が途切れないようにします。
+        """
+        chunks = []
+        paragraphs = text.split('\n\n')
+        current_chunk = ""
+        start_idx = 0
+
+        for para in paragraphs:
+            para_len = len(para) + 2 # +2 for \n\n
+            
