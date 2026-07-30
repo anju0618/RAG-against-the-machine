@@ -3,13 +3,18 @@
 # RAG-against-the-machine
 
 ## Description
-このプロジェクトは、配布された vllm-0.10.1 という大規模なソフトウェアのソースコード一式を対象に、コードの仕様や内容について正確に答えられるRAGシステムを自作することです。
+このプロジェクトは、配布された vllm-0.10.1 という大規模なソフトウェアのソースコード一式を対象に、コードの仕様や内容について正確に答えられるRAGシステム(Retrieval-Augmented Generation)を自作することです。
 
 AI（Qwen3-0.6Bという小型モデルを使います）に直接「このコードはどう動くの？」と聞いても知らないので、まずは既に書いたプログラムで関連するコードの断片を検索（Retrieve）し、それをAIに読ませて回答（Generate）させるパイプラインを作ります。
 ## Instruction
 
 ## Resources
 
+[RAG (検索拡張生成) とは何ですか?](https://aws.amazon.com/jp/what-is/retrieval-augmented-generation/)
+
+[【生成AI入門】「RAG」をできるだけわかりやすく解説してみる](https://qiita.com/Junpei_Takagi/items/f82d31323f00ad895579)
+
+[RAGの実装戦略まとめ](https://qiita.com/jw-automation/items/045917be7b558509fdf2)
 ## memo
 
 ### **RAGとは**:
