@@ -10,11 +10,16 @@ AI（Qwen3-0.6Bという小型モデルを使います）に直接「このコ�
 
 ## Resources
 
+### RAGについて
 [RAG (検索拡張生成) とは何ですか?](https://aws.amazon.com/jp/what-is/retrieval-augmented-generation/)
 
 [【生成AI入門】「RAG」をできるだけわかりやすく解説してみる](https://qiita.com/Junpei_Takagi/items/f82d31323f00ad895579)
 
 [RAGの実装戦略まとめ](https://qiita.com/jw-automation/items/045917be7b558509fdf2)
+
+### UUID
+[Python3でUUIDを生成する](https://qiita.com/shimajiri/items/315d458d3796ed4a60da)
+
 ## memo
 
 ### **RAGとは**:

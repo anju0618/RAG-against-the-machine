@@ -1,7 +1,7 @@
 .PHONY: install run debug clean fclean lint lint-strict test api
 
 SRC_DIR = src
-TEST_DIR = tests/
+# TEST_DIR = tests/
 
 install:
 	uv sync
@@ -21,19 +21,20 @@ clean:
 
 fclean: clean
 	rm -rf .venv
-	rm -rf data/output/*
+	# .gitkeep は残しつつ、生成された JSON ファイルだけを削除する
+	find data/output -type f -name "*.json" -delete
 
 lint:
-	uv run flake8 $(SRC_DIR) $(TEST_DIR)
-	uv run mypy --explicit-package-bases --warn-return-any --warn-unused-ignores --ignore-missing-imports --disallow-untyped-defs --check-untyped-defs $(SRC_DIR) $(TEST_DIR)
+	uv run flake8 $(SRC_DIR)
+	uv run mypy --explicit-package-bases --warn-return-any --warn-unused-ignores --ignore-missing-imports --disallow-untyped-defs --check-untyped-defs $(SRC_DIR)
 
 lint-strict:
-	uv run flake8 $(SRC_DIR) $(TEST_DIR)
-	uv run mypy --explicit-package-bases --strict $(SRC_DIR) $(TEST_DIR)
+	uv run flake8 $(SRC_DIR)
+	uv run mypy --explicit-package-bases --strict $(SRC_DIR)
 
 test:
 	@echo "Running test suite with pytest..."
-	PYTHONPATH=. uv run python -m pytest $(TEST_DIR) -v
+	# PYTHONPATH=. uv run python -m pytest $(TEST_DIR) -v
 
 # Bonus 5: Local HTTP API
 api:

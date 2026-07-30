@@ -8,6 +8,7 @@ dependencies = [
     "accelerate>=1.14.0",
     "fire>=0.7.1",
     "flake8>=7.3.0",
+    "more-itertools>=11.1.0",
     "mypy>=2.3.0",
     "numpy>=2.5.1",
     "pydantic>=2.13.4",
