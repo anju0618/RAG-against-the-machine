@@ -1,3 +1,25 @@
+"""
+retriever.py
+============
+
+Indexerが作成したインデックス（BM25用のチャンク + セマンティック埋め込み）を
+使って、質問に最も関連するソーステキストの場所（file_path と文字範囲）を
+検索するモジュール。
+
+検索方式は2種類を組み合わせている：
+  - BM25（キーワードベースのスコアリング）
+  - セマンティック検索（SentenceTransformerによるコサイン類似度）
+
+この2つのランキングを RRF (Reciprocal Rank Fusion) で統合することで、
+「識別子をそのまま含む質問」にも「意味は同じだが単語が違う質問」にも
+ある程度強いハイブリッド検索を実現している
+（ボーナス1: セマンティック埋め込み／ボーナス2: ハイブリッド検索）。
+
+また、同じクエリ・k の組み合わせに対しては lru_cache で結果を
+メモリ上にキャッシュし、同一クエリが繰り返された場合の応答を高速化する
+（ボーナス4: キャッシング の一部）。
+"""
+
 import json
 import re
 from pathlib import Path
@@ -16,13 +38,21 @@ from src.indexer import STOPWORDS
 
 class Retriever:
     """
-    Indexerが作ったindexを使って、質問に一番関連するソーステキストを探し出します。
-    キャッシュ機能により、繰り返しクエリを高速化します。
+    Indexerが作った index (chunks.json / embeddings.npy) を使って、
+    質問に一番関連するソーステキストを探し出すクラス。
+
+    インスタンス生成時に一度だけインデックスをメモリ上にロードし、
+    以降の検索呼び出しではディスクアクセスを行わない設計になっている。
     """
 
     def __init__(self) -> None:
         """
-        初期化。起動と同時にインデックスをメモリ上にロードします。
+        初期化。インスタンス生成と同時にインデックス
+        （BM25用チャンク + セマンティック埋め込み）をメモリ上にロードする。
+
+        Raises:
+            FileNotFoundError: chunks.json が見つからない場合
+                （事前に `index` コマンドを実行しておく必要がある）
         """
         self.processed_dir = Path("data/processed")
         self.chunks: List[Dict[str, Any]] = []
@@ -30,12 +60,19 @@ class Retriever:
         self.embeddings: np.ndarray | None = None
         self.embed_model: SentenceTransformer | None = None
 
+        # BM25用のインデックスをロード（必須）
         self.load_index()
+        # セマンティック検索用の埋め込みをロード（あれば使う。
+        # 存在しない/読み込み失敗時はBM25のみのフォールバック動作になる）
         self.load_semantic_index()
 
     def load_index(self) -> None:
         """
-        chunks.json を読み込み、ストップワードを除去した状態でBM25エンジンを初期化します。
+        chunks.json を読み込み、ストップワードを除去した状態で
+        BM25エンジンを初期化する。
+
+        Raises:
+            FileNotFoundError: chunks.json が存在しない場合
         """
         chunks_path = self.processed_dir / "chunks.json"
         if not chunks_path.exists():
@@ -45,6 +82,10 @@ class Retriever:
             loaded_data = json.load(f)
             self.chunks = cast(List[Dict[str, Any]], loaded_data)
 
+        # 各チャンクのテキストを単語トークンに分解し、
+        # ストップワードを除いたものをBM25Okapiに渡す。
+        # indexer.pyのload_index()と同じロジックだが、
+        # ここではRetrieverが検索時に使うインスタンスとして保持する。
         tokenized_corpus = [
             [
                 w for w in re.findall(r'\w+', chunk["text"].lower())
@@ -58,7 +99,12 @@ class Retriever:
     def load_semantic_index(self) -> None:
         """
         保存されている embeddings.npy と
-        SentenceTransformer モデルをロードします。
+        SentenceTransformer モデル（all-MiniLM-L6-v2）をロードする。
+
+        embeddings.npy が存在しない、またはロードに失敗した場合は
+        警告を表示するのみで例外は投げない。この場合、hybrid_search()は
+        自動的にBM25のみの結果にフォールバックする
+        （semantic_search()が空リストを返すため）。
         """
         embeddings_path = self.processed_dir / "embeddings.npy"
         if embeddings_path.exists():
@@ -77,14 +123,34 @@ class Retriever:
     def search(self, query: str, k: int = 5) -> List[MinimalSource]:
         """
         【単一クエリの検索】
-        キャッシュを活用してハイブリッド検索を実行します。
+        キャッシュを活用してハイブリッド検索を実行する公開API。
+
+        Args:
+            query: 検索したい質問文字列
+            k: 取得したい上位件数
+
+        Returns:
+            関連度が高い順に並んだ MinimalSource のリスト（最大k件）
         """
         return self._cached_search(query, k)
 
     @lru_cache(maxsize=1024)
     def _cached_search(self, query: str, k: int) -> List[MinimalSource]:
         """
-        内部キャッシュ付き検索メソッド（LRUキャッシュにより最大1024件のクエリ結果を保持）
+        内部キャッシュ付き検索メソッド。
+
+        lru_cache により、同一の (query, k) の組み合わせに対する
+        検索結果を最大1024件までメモリ上にキャッシュする。
+        評価用データセットには同じ質問が複数回投げられることもあるため、
+        このキャッシュによって全体の検索スループットが向上する
+        （仕様の「200問を90秒以内」という性能要件に寄与する）。
+
+        Args:
+            query: 検索クエリ文字列
+            k: 取得したい上位件数
+
+        Returns:
+            hybrid_search() の結果をそのまま返す
         """
         return self.hybrid_search(query, k)
 
@@ -94,7 +160,19 @@ class Retriever:
         """
         【セマンティック検索（ベクトル検索）】
         クエリの埋め込みベクトルと、全チャンクの埋め込みベクトルの
-        コサイン類似度を計算し、上位 k 件のインデックスを返します。
+        コサイン類似度を計算し、上位 k 件のインデックスとスコアを返す。
+
+        埋め込みが正規化済み（normalize_embeddings=True で作成）の場合、
+        コサイン類似度は単純な内積で計算できるため、np.dot を使っている。
+
+        Args:
+            query: 検索クエリ文字列
+            k: 取得したい上位件数
+
+        Returns:
+            (チャンクのインデックス, 類似度スコア) のタプルのリスト。
+            埋め込みインデックスが未ロードの場合は空リストを返す
+            （BM25のみのフォールバック動作になる）。
         """
         if self.embeddings is None or self.embed_model is None:
             return []
@@ -102,7 +180,9 @@ class Retriever:
         query_embedding = self.embed_model.encode(
             query, normalize_embeddings=True
         )
+        # 全チャンクとの内積（＝コサイン類似度）を一気に計算
         scores = np.dot(self.embeddings, query_embedding)
+        # スコアの高い順にソートして上位k件のインデックスを取り出す
         top_indices = np.argsort(scores)[::-1][:k]
 
         return [(int(idx), float(scores[idx])) for idx in top_indices]
@@ -111,12 +191,35 @@ class Retriever:
         """
         【ハイブリッド検索】
         BM25によるキーワード検索とセマンティック検索の結果を
-        RRF (Reciprocal Rank Fusion) を用いて統合し、上位 k 件を返します。
+        RRF (Reciprocal Rank Fusion) を用いて統合し、上位 k 件を返す。
+
+        RRFは「各ランキングにおける順位（rank）」だけを使ってスコアを
+        合成する手法で、スコアのスケールが全く異なる2つの検索手法
+        （BM25のスコアと埋め込みのコサイン類似度）を単純な重み付けなしで
+        公平に統合できるのが利点。
+
+        計算式: score(doc) = Σ 1 / (rrf_k + rank + 1)
+        rrf_k は「上位付近の差を緩やかにする」ためのハイパーパラメータで、
+        ここでは一般的によく使われる60を採用している。
+
+        Args:
+            query: 検索クエリ文字列
+            k: 最終的に返す上位件数
+
+        Returns:
+            関連度が高い順に並んだ MinimalSource のリスト（最大k件）
+
+        Raises:
+            RuntimeError: BM25インデックスが未ロードの場合
+                （通常は__init__でload_index()が呼ばれるため発生しない）
         """
         if self.bm25 is None:
             raise RuntimeError("BM25 index is not loaded.")
 
-        fetch_k = max(k * 5, 50)
+        # 最終的にk件に絞る前に、まず候補を広めに取得しておく
+        # （fetch_k件）。こうすることで、BM25とセマンティックそれぞれの
+        # 上位候補が十分に重なり合い、統合後の精度が安定しやすくなる。
+        fetch_k = max(k * 20, 200)
 
         # 1. BM25によるランキング取得
         tokenized_query = [
@@ -147,12 +250,14 @@ class Retriever:
                 rrf_scores.get(idx, 0.0) + 1.0 / (rrf_k + rank + 1)
             )
 
+        # 統合スコアの高い順に並べ替え、上位k件のインデックスだけを残す
         sorted_indices = sorted(
             rrf_scores.keys(),
             key=lambda x: rrf_scores[x],
             reverse=True
         )[:k]
 
+        # インデックスから実際のソース情報（MinimalSource）へ変換する
         sources = []
         for idx in sorted_indices:
             chunk = self.chunks[idx]
@@ -169,14 +274,21 @@ class Retriever:
         self, dataset_path: str, k: int = 5
     ) -> StudentSearchResults:
         """
-        複数の質問が記載されたJSONファイルを読み込み、それぞれの質問に対して検索を実行
+        複数の質問が記載されたJSONファイル（データセット）を読み込み、
+        それぞれの質問に対してバッチで検索を実行する。
 
         Args:
-            dataset_path: 質問データセットのJSONファイルパス (str)
+            dataset_path: 質問データセットのJSONファイルパス (str)。
+                {"rag_questions": [{"question_id": ..., "question": ...}, ...]}
+                という構造を想定。
             k: 各質問ごとに取得する上位件数 (int)
 
         Returns:
-            StudentSearchResults: moulinetteに送るやつ
+            StudentSearchResults: search_dataset コマンドの出力として
+                そのままJSONに書き出せる、moulinette評価用の形式
+
+        Raises:
+            FileNotFoundError: dataset_path が存在しない場合
         """
         dataset_file = Path(dataset_path)
         if not dataset_file.exists():
@@ -195,6 +307,7 @@ class Retriever:
             q_id = str(q["question_id"])
             q_text = str(q["question"])
 
+            # 質問ごとに単一クエリ検索を呼び出す（内部でキャッシュも効く）
             sources = self.search(q_text, k)
 
             results.append(
