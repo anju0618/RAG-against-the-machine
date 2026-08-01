@@ -23,7 +23,6 @@ class RAGCLI:
 
     def index(self, max_chunk_size: int = 2000, debug: bool = False) -> None:
         """
-        【コマンド】
         vLLMコーパスを読み込み、チャンクに分割してインデックスを構築・保存します。
         """
         try:
@@ -39,7 +38,6 @@ class RAGCLI:
 
     def search(self, query: str = "", k: int = 5, debug: bool = False) -> None:
         """
-        【コマンド】
         単一の質問文字列に対して、BM25を用いて関連度の高い上位 k 件を検索します。
         """
         if not query:
@@ -77,7 +75,6 @@ class RAGCLI:
         debug: bool = False
     ) -> None:
         """
-        【コマンド】
         データセット（複数質問のJSON）を読み込み、一括で検索を実行し保存します。
         """
         if not dataset_path or not save_directory:
@@ -103,7 +100,6 @@ class RAGCLI:
 
     def answer(self, query: str = "", k: int = 5, debug: bool = False) -> None:
         """
-        【コマンド】
         単一の質問に対して検索を行い、文字列（コンテキスト・プロンプト）を
         組み立ててLLMに渡し、回答を生成します。
         """
@@ -122,7 +118,6 @@ class RAGCLI:
             )
             generator = Generator(k=k)
 
-            # 🛠️ ここで「文字列が作られていく過程」を詳細にビジュアライズ
             if debug:
                 print("\n" + "=" * 60)
                 print("🔍 [DEBUG] 文字列・コンテキスト構築の過程 (String Building)")
@@ -161,7 +156,6 @@ class RAGCLI:
         debug: bool = False
     ) -> None:
         """
-        【コマンド】
         データセットに対して一括で回答生成を行い、JSONに保存します。
         """
         if not student_search_results_path or not save_directory:
@@ -233,7 +227,6 @@ class RAGCLI:
         debug: bool = False
     ) -> None:
         """
-        【コマンド】
         評価プレースホルダー（ローカル確認用）。
         """
         if not student_search_results_path or not dataset_path:
@@ -245,7 +238,7 @@ class RAGCLI:
 
     def _load_preview_text(self, source: MinimalSource) -> str:
         """
-        デバッグ表示用にソースのテキストを安全に読み込むヘルパー。
+        デバッグ表示用にソースのテキストを安全に読み込むヘルパー
         """
         try:
             with open(source.file_path, "r", encoding="utf-8") as f:
@@ -258,7 +251,7 @@ class RAGCLI:
 
     def _indent_text(self, text: str, spaces: int) -> str:
         """
-        デバッグ表示の見た目を整えるためインデントを付与するヘルパー。
+        デバッグ表示の見た目を整えるためインデントを付与するヘルパー
         """
         indent = " " * spaces
         lines = text.strip().splitlines()
@@ -267,7 +260,7 @@ class RAGCLI:
 
 def main() -> None:
     """
-    アプリケーションのエントリポイント。
+    アプリケーションのエントリポイント
     """
     try:
         fire.Fire(RAGCLI)
