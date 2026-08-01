@@ -30,7 +30,7 @@ lint:
 
 lint-strict:
 	uv run flake8 $(SRC_DIR)
-	uv run mypy --explicit-package-bases --strict $(SRC_DIR)
+	uv run mypy --strict $(SRC_DIR)
 
 test:
 	@echo "Running test suite with pytest..."

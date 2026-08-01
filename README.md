@@ -20,6 +20,16 @@ AI（Qwen3-0.6Bという小型モデルを使います）に直接「このコ�
 ### UUID
 [Python3でUUIDを生成する](https://qiita.com/shimajiri/items/315d458d3796ed4a60da)
 
+### Transformerライブラリ
+[HuggingFaceのTransformerライブラリを使ってみよう](https://qiita.com/ski2_1116/items/f74e7b97008663d0702d)
+
+[LLMでよく見る関数についての解説](https://qiita.com/ilovebooks0618/items/0292ec6ad09a6340f64b)
+
+### Pytorch
+[【2024年最新版】Python🐍PyTorch初心者ガイド](https://qiita.com/wooooo/items/f7d439e166ff664ad47c)
+
+[PytorchによるLLMの高速化](https://zenn.dev/umeko/articles/fe961fda3148d1)
+
 ## memo
 
 ### **RAGとは**:

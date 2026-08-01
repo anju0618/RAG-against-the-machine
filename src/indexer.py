@@ -3,10 +3,9 @@ import os
 import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional, cast
-from tqdm import tqdm  # type: ignore
-from rank_bm25 import BM25Okapi  # type: ignore
+from tqdm import tqdm
+from rank_bm25 import BM25Okapi
 
-# 検索ノイズを排除するためのストップワード（冠詞や前置詞など）の定義
 STOPWORDS = {
     "a", "about", "above", "after", "again", "against", "all", "am", "an",
     "and", "any", "are", "as", "at", "be", "because", "been", "before",
@@ -28,24 +27,20 @@ STOPWORDS = {
 
 class Indexer:
     """
-    【役割】図書館の司書
-    大量のソースコードやドキュメントを読み込み、
-    検索しやすい状態（インデックス）に整理して保存するクラスです。
+    Indexer using BM25Okapi
     """
 
     def __init__(self, max_chunk_size: int = 2000) -> None:
         """
-        システムの初期設定を行います。
-
         Args:
-            max_chunk_size: 1つのチャンクが許容する最大文字数（デフォルト: 2000文字）
+            max_chunk_size: max chunk size(default: 2000)
         """
         self.max_chunk_size = max_chunk_size
         self.corpus_dir = Path("data/raw/vllm-0.10.1")
         self.processed_dir = Path("data/processed")
 
-        # チャンクのリスト
-        # 形の例:
+        # chunks
+        # ex:
         # [
         #     {
         #         "file_path": "data/raw/vllm-0.10.1/README.md",
@@ -55,8 +50,7 @@ class Indexer:
         #     }
         # ]
         self.chunks: List[Dict[str, Any]] = []
-
-        # BM25検索エンジンのインスタンス
+        # BM25 instance
         self.bm25: Optional[BM25Okapi] = None
 
     def _safe_append(
@@ -67,9 +61,7 @@ class Indexer:
         text: str
     ) -> None:
         """
-        【安全装置】
-        2000文字の絶対上限を守るため、超過したテキストを強制的に分割して追加します。
-
+        safe appender (not mehr 2000)
         Args:
             chunks: 追加先のチャンクリーンリスト
             file_path: 対象ファイルのパス (str)
@@ -91,8 +83,7 @@ class Indexer:
         self, text: str, file_path: str
     ) -> List[Dict[str, Any]]:
         """
-        【Pythonファイル用の分割戦略】
-        コードは「行（改行）」単位で意味を持つため、行ごとに分割してチャンクを作ります。
+        【Python】行ごとに分割してチャンクを作ります。
         """
         chunks: List[Dict[str, Any]] = []
         lines = text.split('\n')
@@ -122,7 +113,7 @@ class Indexer:
         self, text: str, file_path: str
     ) -> List[Dict[str, Any]]:
         """
-        【Markdownファイル用の分割戦略】
+        【Markdown】
         ドキュメントは「段落（空行）」単位で意味を持つため、\n\nで分割してチャンクを作ります。
         """
         chunks: List[Dict[str, Any]] = []
@@ -151,7 +142,7 @@ class Indexer:
 
     def index_corpus(self) -> None:
         """
-        【メイン処理】すべてのファイルを走査・分割し、ストップワードを除去した上でBM25インデックスを構築・保存します。
+        すべてのファイルを走査・分割し、ストップワードを除去した上でBM25インデックスを構築・保存します。
         """
         if not self.corpus_dir.exists():
             raise FileNotFoundError(f"Directory not found: {self.corpus_dir}")
@@ -186,7 +177,11 @@ class Indexer:
         print(f"Created {len(self.chunks)} chunks. Building BM25 index...")
 
         # トークン化の形・例:
-        # [["how", "configure", "openai", "server"], ["vllm", "is", ...], ...]
+        # [
+        #   ["paged", "attention", "vllm", "implementation"],  # 1つ目のチャンクの単語
+        #   ["cache", "block", "memory", "allocation"],    # 2つ目のチャンクの単語
+        #   ...
+        # ]
         tokenized_corpus = [
             [
                 w for w in re.findall(r'\w+', chunk["text"].lower())

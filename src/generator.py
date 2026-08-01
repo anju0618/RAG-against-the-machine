@@ -21,9 +21,7 @@ from src.retriever import Retriever
 
 class Generator:
     """
-    【役割】回答生成エンジン
-    検索されたソースのテキストをファイルから切り出して読み込み、
-    ローカルLLMを使ってグラウンディングされた自然言語の回答を生成します。
+    ローカルLLMを使ってグラウンディングされた自然言語の回答を生成
     """
 
     def __init__(
@@ -34,8 +32,7 @@ class Generator:
         k: int = 5,
     ) -> None:
         """
-        LLMマネージャーの初期化。
-        Hugging Faceからモデルとトークナイザーをロードします。
+        LLMマネージャーの初期化
         """
         self.model_name = model_name
         self.batch_size = batch_size
@@ -47,6 +44,7 @@ class Generator:
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_name, padding_side="left"
         )
+        # Qwenなどではpad_tokenが用意されてないかも
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
@@ -59,13 +57,13 @@ class Generator:
     def _load_chunk(self, source: MinimalSource) -> str:
         """
         ファイルのパスと文字インデックスの範囲を指定して、
-        実ファイルから該当部分の文字列を切り出します。
+        実ファイルから該当部分の文字列を切り出す
 
         Args:
             source: MinimalSourceオブジェクト（file_path, indices を含む）
 
         Returns:
-            切り出されたテキストコードの断片 (str)
+            切り出されたテキストコード(str)
         """
         file_path = Path(source.file_path)
         if not file_path.exists():
@@ -85,7 +83,7 @@ class Generator:
     ) -> List[Dict[str, str]]:
         """
         LLMに与えるためのシステムプロンプトとユーザープロンプト
-        （検索コンテキスト＋質問）を組み立てます。
+        （検索コンテキスト＋質問）を組み立てる
 
         Args:
             result: MinimalSearchResultsオブジェクト
@@ -139,7 +137,7 @@ class Generator:
     ) -> List[str]:
         """
         検索結果のリストを受け取り、バッチ単位でLLMに推論を行って
-        回答文字列のリストを生成します。
+        回答文字列のリストを生成
 
         Args:
             search_results: MinimalSearchResultsのリスト
@@ -182,7 +180,7 @@ class Generator:
     ) -> StudentSearchResultsAndAnswer:
         """
         データセット全体を読み込み、
-        検索から回答生成まで一気通貫で行います。
+        検索から回答生成する
         """
         retriever = Retriever()
         search_results_obj = retriever.search_dataset(dataset_path, k=k)

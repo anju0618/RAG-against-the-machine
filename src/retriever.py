@@ -2,7 +2,7 @@ import json
 import re
 from pathlib import Path
 from typing import List, Dict, Any, cast
-from rank_bm25 import BM25Okapi  # type: ignore
+from rank_bm25 import BM25Okapi
 from src.models import (
     MinimalSource,
     MinimalSearchResults,
@@ -13,13 +13,12 @@ from src.indexer import STOPWORDS
 
 class Retriever:
     """
-    【役割】検索ロボット
-    Indexerが作った辞書を使って、質問に一番関連するソーステキストを探し出します。
+    Indexerが作ったindexを使って、質問に一番関連するソーステキストを探し出します。
     """
 
     def __init__(self) -> None:
         """
-        リトリーバーの初期化。起動と同時にインデックスをメモリ上にロードします。
+        初期化。起動と同時にインデックスをメモリ上にロードします。
         """
         self.processed_dir = Path("data/processed")
         self.chunks: List[Dict[str, Any]] = []
@@ -52,7 +51,7 @@ class Retriever:
     def search(self, query: str, k: int = 5) -> List[MinimalSource]:
         """
         【単一クエリの検索】
-        1つの質問文字列に対して、関連度の高い上位 k 件のソース位置を返します。
+        1つの質問文字列に対して、関連度の高い上位 k 件のソース位置を返す
 
         Args:
             query: 検索クエリ文字列 (例: "How to configure the OpenAI server?")
@@ -64,7 +63,6 @@ class Retriever:
         if self.bm25 is None:
             raise RuntimeError("BM25 index is not loaded.")
 
-        # クエリ文からストップワードを除去し、小文字化してトークン化
         tokenized_query = [
             w for w in re.findall(r'\w+', query.lower())
             if w not in STOPWORDS
@@ -92,15 +90,14 @@ class Retriever:
         self, dataset_path: str, k: int = 5
     ) -> StudentSearchResults:
         """
-        【データセット一括検索】
-        複数の質問が記載されたJSONファイル（例: 100問）を読み込み、それぞれの質問に対して検索を実行します。
+        複数の質問が記載されたJSONファイルを読み込み、それぞれの質問に対して検索を実行
 
         Args:
             dataset_path: 質問データセットのJSONファイルパス (str)
             k: 各質問ごとに取得する上位件数 (int)
 
         Returns:
-            StudentSearchResults: 採点形式に準拠した検索結果オブジェクト
+            StudentSearchResults: moulinetteに送るやつ
         """
         dataset_file = Path(dataset_path)
         if not dataset_file.exists():

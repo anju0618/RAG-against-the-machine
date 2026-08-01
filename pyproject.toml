@@ -18,3 +18,10 @@ dependencies = [
     "tqdm>=4.69.1",
     "transformers>=5.14.1",
 ]
+[[tool.mypy.overrides]]
+module = [
+    "tqdm",
+    "rank_bm25",
+    "fire"
+]
+ignore_missing_imports = true

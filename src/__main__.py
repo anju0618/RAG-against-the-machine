@@ -1,8 +1,7 @@
 import sys
 import json
 from pathlib import Path
-import fire  # type: ignore[import-untyped]
-
+import fire
 from src.indexer import Indexer
 from src.retriever import Retriever
 from src.generator import Generator
