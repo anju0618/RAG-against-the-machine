@@ -1,8 +1,11 @@
 import json
 import re
 from pathlib import Path
-from typing import List, Dict, Any, cast
+from typing import List, Dict, Any, Tuple, cast
+from functools import lru_cache
 from rank_bm25 import BM25Okapi
+import numpy as np
+from sentence_transformers import SentenceTransformer
 from src.models import (
     MinimalSource,
     MinimalSearchResults,
@@ -14,6 +17,7 @@ from src.indexer import STOPWORDS
 class Retriever:
     """
     Indexerが作ったindexを使って、質問に一番関連するソーステキストを探し出します。
+    キャッシュ機能により、繰り返しクエリを高速化します。
     """
 
     def __init__(self) -> None:
@@ -23,8 +27,11 @@ class Retriever:
         self.processed_dir = Path("data/processed")
         self.chunks: List[Dict[str, Any]] = []
         self.bm25: BM25Okapi | None = None
+        self.embeddings: np.ndarray | None = None
+        self.embed_model: SentenceTransformer | None = None
 
         self.load_index()
+        self.load_semantic_index()
 
     def load_index(self) -> None:
         """
@@ -48,34 +55,106 @@ class Retriever:
         self.bm25 = BM25Okapi(tokenized_corpus)
         print(f"Loaded {len(self.chunks)} chunks into Retriever.")
 
+    def load_semantic_index(self) -> None:
+        """
+        保存されている embeddings.npy と
+        SentenceTransformer モデルをロードします。
+        """
+        embeddings_path = self.processed_dir / "embeddings.npy"
+        if embeddings_path.exists():
+            try:
+                self.embeddings = np.load(embeddings_path)
+                self.embed_model = SentenceTransformer(
+                    "all-MiniLM-L6-v2", device="cpu"
+                )
+                print(
+                    "Loaded semantic embeddings shape: "
+                    f"{self.embeddings.shape}"
+                )
+            except Exception as e:
+                print(f"Warning: Could not load semantic embeddings: {e}")
+
     def search(self, query: str, k: int = 5) -> List[MinimalSource]:
         """
         【単一クエリの検索】
-        1つの質問文字列に対して、関連度の高い上位 k 件のソース位置を返す
+        キャッシュを活用してハイブリッド検索を実行します。
+        """
+        return self._cached_search(query, k)
 
-        Args:
-            query: 検索クエリ文字列 (例: "How to configure the OpenAI server?")
-            k: 取得する上位の件数 (int, デフォルト: 5)
+    @lru_cache(maxsize=1024)
+    def _cached_search(self, query: str, k: int) -> List[MinimalSource]:
+        """
+        内部キャッシュ付き検索メソッド（LRUキャッシュにより最大1024件のクエリ結果を保持）
+        """
+        return self.hybrid_search(query, k)
 
-        Returns:
-            MinimalSourceオブジェクトのリスト (最大 k 件)
+    def semantic_search(
+        self, query: str, k: int = 5
+    ) -> List[Tuple[int, float]]:
+        """
+        【セマンティック検索（ベクトル検索）】
+        クエリの埋め込みベクトルと、全チャンクの埋め込みベクトルの
+        コサイン類似度を計算し、上位 k 件のインデックスを返します。
+        """
+        if self.embeddings is None or self.embed_model is None:
+            return []
+
+        query_embedding = self.embed_model.encode(
+            query, normalize_embeddings=True
+        )
+        scores = np.dot(self.embeddings, query_embedding)
+        top_indices = np.argsort(scores)[::-1][:k]
+
+        return [(int(idx), float(scores[idx])) for idx in top_indices]
+
+    def hybrid_search(self, query: str, k: int = 5) -> List[MinimalSource]:
+        """
+        【ハイブリッド検索】
+        BM25によるキーワード検索とセマンティック検索の結果を
+        RRF (Reciprocal Rank Fusion) を用いて統合し、上位 k 件を返します。
         """
         if self.bm25 is None:
             raise RuntimeError("BM25 index is not loaded.")
 
+        fetch_k = max(k * 5, 50)
+
+        # 1. BM25によるランキング取得
         tokenized_query = [
             w for w in re.findall(r'\w+', query.lower())
             if w not in STOPWORDS
         ]
-
-        top_k_indices = self.bm25.get_top_n(
+        bm25_indices = self.bm25.get_top_n(
             tokenized_query,
             range(len(self.chunks)),
-            n=k
+            n=fetch_k
         )
 
+        # 2. セマンティック検索によるランキング取得
+        semantic_results = self.semantic_search(query, k=fetch_k)
+        semantic_indices = [idx for idx, _ in semantic_results]
+
+        # 3. RRF (Reciprocal Rank Fusion) によるスコア統合
+        rrf_scores: Dict[int, float] = {}
+        rrf_k = 60
+
+        for rank, idx in enumerate(bm25_indices):
+            rrf_scores[idx] = (
+                rrf_scores.get(idx, 0.0) + 1.0 / (rrf_k + rank + 1)
+            )
+
+        for rank, idx in enumerate(semantic_indices):
+            rrf_scores[idx] = (
+                rrf_scores.get(idx, 0.0) + 1.0 / (rrf_k + rank + 1)
+            )
+
+        sorted_indices = sorted(
+            rrf_scores.keys(),
+            key=lambda x: rrf_scores[x],
+            reverse=True
+        )[:k]
+
         sources = []
-        for idx in top_k_indices:
+        for idx in sorted_indices:
             chunk = self.chunks[idx]
             sources.append(
                 MinimalSource(

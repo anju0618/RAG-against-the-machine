@@ -14,6 +14,7 @@ dependencies = [
     "pydantic>=2.13.4",
     "pytest>=9.1.1",
     "rank-bm25>=0.2.2",
+    "sentence-transformers>=5.6.1",
     "torch>=2.13.0",
     "tqdm>=4.69.1",
     "transformers>=5.14.1",
@@ -22,6 +23,13 @@ dependencies = [
 module = [
     "tqdm",
     "rank_bm25",
-    "fire"
+    "fire",
+    "fastapi",
+    "uvicorn",
+    "sentence_transformers"
 ]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "src.api"
+disallow_untyped_decorators = false

@@ -153,6 +153,7 @@ uv venv && uv sync
 - [Python3でUUIDを生成する](https://qiita.com/shimajiri/items/315d458d3796ed4a60da)
 - [HuggingFaceのTransformerライブラリを使ってみよう](https://qiita.com/ski2_1116/items/f74e7b97008663d0702d)
 - [PyTorch初心者ガイド](https://qiita.com/wooooo/items/f7d439e166ff664ad47c)
+- [エンジニアのための AI 基礎 - ベクトル埋め込みと仲良くなりたい！](https://qiita.com/yuji-arakawa/items/14a26f038740e7b89f3c)
 
 ### AIの利用について
 本プロジェクトの開発にあたり、AIツールはPydanticモデルのボイラープレートコードの記述、チャンキング処理における正規表現の最適化、およびローカルLLMへのプロンプトテンプレートの構成補助として活用しました。生成されたコードやロジックはすべて著者自身で詳細にレビュー、テストしました

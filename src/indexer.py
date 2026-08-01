@@ -2,9 +2,11 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import List, Dict, Any, Optional, cast
+from typing import List, Dict, Any, Optional, Tuple, cast
 from tqdm import tqdm
 from rank_bm25 import BM25Okapi
+import numpy as np
+from sentence_transformers import SentenceTransformer
 
 STOPWORDS = {
     "a", "about", "above", "after", "again", "against", "all", "am", "an",
@@ -27,7 +29,7 @@ STOPWORDS = {
 
 class Indexer:
     """
-    Indexer using BM25Okapi
+    Indexer using BM25Okapi and SentenceTransformers with Incremental Indexing
     """
 
     def __init__(self, max_chunk_size: int = 2000) -> None:
@@ -142,7 +144,8 @@ class Indexer:
 
     def index_corpus(self) -> None:
         """
-        すべてのファイルを走査・分割し、ストップワードを除去した上でBM25インデックスを構築・保存します。
+        差分インデックス（Incremental indexing）を用いて、
+        変更・新規があったファイルのみを再インデックスします。
         """
         if not self.corpus_dir.exists():
             raise FileNotFoundError(f"Directory not found: {self.corpus_dir}")
@@ -150,49 +153,125 @@ class Indexer:
         self.processed_dir.mkdir(parents=True, exist_ok=True)
         target_extensions = {'.py', '.md', '.txt', '.rst'}
 
-        filepaths = []
+        chunks_path = self.processed_dir / "chunks.json"
+        embeddings_path = self.processed_dir / "embeddings.npy"
+        meta_path = self.processed_dir / "file_meta.json"
+
+        # 既存データとメタデータのロード
+        existing_chunks: List[Dict[str, Any]] = []
+        existing_embeddings: Optional[np.ndarray] = None
+        file_meta: Dict[str, float] = {}
+
+        if chunks_path.exists() and meta_path.exists():
+            with open(chunks_path, "r", encoding="utf-8") as f:
+                existing_chunks = json.load(f)
+            with open(meta_path, "r", encoding="utf-8") as f:
+                file_meta = json.load(f)
+            if embeddings_path.exists():
+                existing_embeddings = np.load(embeddings_path)
+
+        # 現在のファイル一覧と更新日時（mtime）を取得
+        current_files: Dict[str, float] = {}
+        filepaths_to_process = []
+
         for root, _, files in os.walk(self.corpus_dir):
             for file in files:
-                if Path(file).suffix in target_extensions:
-                    filepaths.append(Path(root) / file)
+                file_path = Path(root) / file
+                if file_path.suffix in target_extensions:
+                    str_path = str(file_path)
+                    mtime = file_path.stat().st_mtime
+                    current_files[str_path] = mtime
+                    if (
+                        str_path not in file_meta
+                        or file_meta[str_path] != mtime
+                    ):
+                        filepaths_to_process.append(file_path)
 
-        print(f"Found {len(filepaths)} files to index.")
+        deleted_files = set(file_meta.keys()) - set(current_files.keys())
 
-        for file_path in tqdm(filepaths, desc="Chunking"):
+        print(
+            "Incremental Indexing: "
+            f"{len(filepaths_to_process)} files to update, "
+            f"{len(deleted_files)} files deleted."
+        )
+
+        # 変更・追加ファイルの処理とチャンク作成
+        new_chunks_by_file: Dict[str, List[Dict[str, Any]]] = {}
+        embed_model = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
+
+        for file_path in tqdm(
+                filepaths_to_process,
+                desc="Incremental Chunking"
+                ):
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     text = f.read()
 
+                str_path = str(file_path)
                 if file_path.suffix == '.py':
-                    file_chunks = self.chunk_python_code(text, str(file_path))
+                    file_chunks = self.chunk_python_code(text, str_path)
                 else:
-                    file_chunks = self.chunk_markdown_text(
-                        text, str(file_path)
-                    )
+                    file_chunks = self.chunk_markdown_text(text, str_path)
 
-                self.chunks.extend(file_chunks)
+                new_chunks_by_file[str_path] = file_chunks
             except Exception:
                 continue
 
-        print(f"Created {len(self.chunks)} chunks. Building BM25 index...")
+        # 新規・変更ファイルの埋め込み計算
+        new_embeddings_by_file: Dict[str, np.ndarray] = {}
+        for str_path, chunks in new_chunks_by_file.items():
+            if chunks:
+                texts = [c["text"] for c in chunks]
+                embs = embed_model.encode(
+                    texts, batch_size=64, normalize_embeddings=True
+                )
+                new_embeddings_by_file[str_path] = embs
 
-        # トークン化の形・例:
-        # [
-        #   ["paged", "attention", "vllm", "implementation"],  # 1つ目のチャンクの単語
-        #   ["cache", "block", "memory", "allocation"],    # 2つ目のチャンクの単語
-        #   ...
-        # ]
-        tokenized_corpus = [
-            [
-                w for w in re.findall(r'\w+', chunk["text"].lower())
-                if w not in STOPWORDS
-            ]
-            for chunk in tqdm(self.chunks, desc="Tokenizing")
-        ]
+        # 既存データと新規データの結合・再構築
+        final_chunks: List[Dict[str, Any]] = []
+        final_embeddings_list: List[np.ndarray] = []
 
-        self.bm25 = BM25Okapi(tokenized_corpus)
+        if (
+            existing_chunks
+            and existing_embeddings is not None
+            and len(existing_chunks) == len(existing_embeddings)
+        ):
+            file_data: Dict[str, List[Tuple[Dict[str, Any], np.ndarray]]] = {}
+            for i, chunk in enumerate(existing_chunks):
+                fpath = chunk["file_path"]
+                if fpath not in file_data:
+                    file_data[fpath] = []
+                file_data[fpath].append((chunk, existing_embeddings[i]))
+
+            for fpath, pairs in file_data.items():
+                if fpath in deleted_files or fpath in new_chunks_by_file:
+                    continue
+                for chunk, emb in pairs:
+                    final_chunks.append(chunk)
+                    final_embeddings_list.append(emb)
+
+        for str_path, chunks in new_chunks_by_file.items():
+            if chunks and str_path in new_embeddings_by_file:
+                embs = new_embeddings_by_file[str_path]
+                for i, chunk in enumerate(chunks):
+                    final_chunks.append(chunk)
+                    final_embeddings_list.append(embs[i])
+
+        self.chunks = final_chunks
+        if final_embeddings_list:
+            final_embeddings = np.array(final_embeddings_list)
+        else:
+            final_embeddings = np.zeros((0, 384))
+
         self.save_index()
-        print(f"Indexed {len(self.chunks)} chunks to {self.processed_dir}/")
+        np.save(embeddings_path, final_embeddings)
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(current_files, f, ensure_ascii=False, indent=2)
+
+        print(
+            f"Incremental indexing complete. "
+            f"Total chunks: {len(self.chunks)}"
+        )
 
     def save_index(self) -> None:
         """
