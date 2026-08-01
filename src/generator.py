@@ -162,8 +162,6 @@ class Generator:
                 assert isinstance(prompt_tokens, BatchEncoding)
                 prompt_tokens = prompt_tokens.to(self.device)
                 input_length = prompt_tokens["input_ids"].shape[1]
-
-                # mypy --strict対策としてキャストを適用
                 generated_ids = cast(Any, self.model).generate(
                     **prompt_tokens, max_new_tokens=self.max_new_tokens
                 )

@@ -15,10 +15,7 @@ from src.models import (
 
 class RAGCLI:
     """
-    【役割】操作パネル（Command-Line Interface）
-    ターミナルからのコマンド入力を受け付けて、
-    Indexer（司書）, Retriever（検索ロボット）,
-    Generator（回答生成）に適切な指示を出します。
+    エントリクラス
     """
 
     def index(self, max_chunk_size: int = 2000, debug: bool = False) -> None:
@@ -38,7 +35,7 @@ class RAGCLI:
 
     def search(self, query: str = "", k: int = 5, debug: bool = False) -> None:
         """
-        単一の質問文字列に対して、BM25を用いて関連度の高い上位 k 件を検索します。
+        単一の質問文字列に対して、BM25を用いて関連度の高い上位 k 件を検索
         """
         if not query:
             print("Error: query cannot be empty.", file=sys.stderr)
@@ -101,7 +98,7 @@ class RAGCLI:
     def answer(self, query: str = "", k: int = 5, debug: bool = False) -> None:
         """
         単一の質問に対して検索を行い、文字列（コンテキスト・プロンプト）を
-        組み立ててLLMに渡し、回答を生成します。
+        組み立ててLLMに渡し、回答を生成
         """
         if not query:
             print("Error: query cannot be empty.", file=sys.stderr)
@@ -227,7 +224,7 @@ class RAGCLI:
         debug: bool = False
     ) -> None:
         """
-        評価プレースホルダー（ローカル確認用）。
+        評価プレースホルダー
         """
         if not student_search_results_path or not dataset_path:
             print("Error: both paths are required.", file=sys.stderr)
@@ -260,7 +257,7 @@ class RAGCLI:
 
 def main() -> None:
     """
-    アプリケーションのエントリポイント
+    エントリポイント
     """
     try:
         fire.Fire(RAGCLI)
