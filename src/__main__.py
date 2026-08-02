@@ -6,7 +6,7 @@ RAGパイプラインのコマンドラインエントリポイント。
 Python Fire を使い、RAGCLI クラスの各メソッドをそのままサブコマンドとして
 公開している（例: `uv run python -m src index --max_chunk_size 2000`）。
 
-用意されているコマンド:
+コマンド:
     index          コーパスをインデックス化する
     search         単一クエリで検索する
     search_dataset データセット全体で検索する（結果をJSONに保存）
@@ -38,7 +38,12 @@ class RAGCLI:
     各public methodがそのままサブコマンドになる。
     """
 
-    def index(self, max_chunk_size: int = 2000, skip_vector: bool = False, debug: bool = False) -> None:
+    def index(
+            self,
+            max_chunk_size: int = 2000,
+            skip_vector: bool = False,
+            debug: bool = False
+            ) -> None:
         """
         コーパス（data/raw/ 配下）を読み込み、チャンクに分割して
         インデックスを構築・保存する。
@@ -52,7 +57,10 @@ class RAGCLI:
             出すだけに留める（CLIが未処理の例外でクラッシュしないため）。
         """
         try:
-            indexer = Indexer(max_chunk_size=max_chunk_size, skip_vector=skip_vector)
+            indexer = Indexer(
+                max_chunk_size=max_chunk_size,
+                skip_vector=skip_vector
+                )
             indexer.index_corpus()
             if debug:
                 print(
@@ -68,10 +76,10 @@ class RAGCLI:
         を用いて関連度の高い上位 k 件を検索し、結果を標準出力に表示する。
 
         Args:
-            query: 検索したい質問文字列（空文字はエラー扱い）
+            query: 検索したい質問文字列
             k: 取得する上位件数
             debug: Trueの場合、各結果について実際に切り出されたテキストの
-                プレビューも表示する
+                    プレビューも表示する
         """
         if not query:
             print("Error: query cannot be empty.", file=sys.stderr)
@@ -142,7 +150,7 @@ class RAGCLI:
     def answer(self, query: str = "", k: int = 5, debug: bool = False) -> None:
         """
         単一の質問に対して検索を行い、検索結果からプロンプト用の
-        コンテキスト文字列を組み立て、LLMに渡して回答を生成する。
+        コンテキスト文字列を組み立て、LLMに渡して回答を生成する
 
         Args:
             query: 質問文字列（空文字はエラー扱い）
@@ -187,7 +195,7 @@ class RAGCLI:
                     )
 
                 print("\n" + "-" * 60)
-                print("🤖 [DEBUG] 最終的なLLMプロンプト（入力文字列）の全貌:")
+                print("🤖 [DEBUG] 最終的なLLMプロンプト:")
                 print("-" * 60)
                 prompt_msgs = generator._generate_prompt(search_result)
                 for msg in prompt_msgs:

@@ -5,10 +5,9 @@ models.py
 パイプラインの各ステージ（Indexer -> Retriever -> Generator -> API/CLI）の
 間でやり取りされるデータ構造を pydantic の BaseModel として定義するモジュール。
 
-仕様書で「データモデルは pydantic を使うこと」と明記されている通り、
 ここで定義されたモデルはmoulinette（評価スクリプト）が読み込むJSONの
 構造と完全に一致している必要がある。フィールド名・型を勝手に変更すると
-評価に失敗するため、拡張する場合は既存フィールドを壊さず追加のみ行うこと。
+評価に失敗するため、拡張する場合は既存フィールドを壊さず追加のみ行うこと
 """
 
 import uuid
@@ -18,7 +17,7 @@ from pydantic import BaseModel, Field
 
 class MinimalSource(BaseModel):
     """
-    検索によって見つかった「ソースの場所」を表す最小単位のモデル。
+    検索によって見つかった「ソースの場所」を表すモデル。
 
     テキストの中身そのものは持たず、「どのファイルの、
     何文字目から何文字目までか」という位置情報だけを持つ。
@@ -65,8 +64,8 @@ class UnansweredQuestion(BaseModel):
 
 class AnsweredQuestion(UnansweredQuestion):
     """
-    質問に加えて、正解のソース（sources）と模範解答（answer）が
-    セットになったモデル。評価用データセット（ground truth）で使われる。
+    質問に加えて、sourcesとanswerが
+    セットになったモデル評価用データセット（ground truth）で使われる。
 
     例:
         {
@@ -93,7 +92,7 @@ class RagDataset(BaseModel):
     評価用データセットのJSONファイル全体構造を表現するモデル。
 
     rag_questions は AnsweredQuestion（正解付き）と
-    UnansweredQuestion（正解なし、質問のみ）のどちらも許容する。
+    UnansweredQuestion（正解なし、質問のみ）のどちらも許容する
 
     例:
         {

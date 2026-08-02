@@ -230,7 +230,11 @@ class Indexer:
     再チャンク・再埋め込みし、既存のチャンク/埋め込みは使い回す。
     """
 
-    def __init__(self, max_chunk_size: int = 2000, skip_vector: bool = False) -> None:
+    def __init__(
+            self,
+            max_chunk_size: int = 2000,
+            skip_vector: bool = False
+            ) -> None:
         """
         Indexerを初期化する。
 
@@ -247,16 +251,6 @@ class Indexer:
         """
         self.max_chunk_size = max_chunk_size
         self.skip_vector = skip_vector
-
-        # コーパスのルートディレクトリ。
-        # 特定のバージョン名（例: "vllm-0.10.1"）をハードコードすると、
-        # 評価環境でフォルダ名が変わった瞬間にインデックス作成が失敗する。
-        # そのため data/raw/ 配下を再帰的に os.walk() で走査する設計にし、
-        # 実際のサブフォルダ名に依存しないようにしている。
-        # file_path はこの走査で見つかった実パス
-        # （例: "data/raw/vllm-0.10.1/README.md"）がそのまま使われるため、
-        # 「file_pathは検索対象コーパスのパスと完全一致する」という
-        # 仕様要件も自然に満たされる。
         self.corpus_dir = Path("data/raw")
         self.processed_dir = Path("data/processed")
 
@@ -272,8 +266,6 @@ class Indexer:
         #     ...
         # ]
         self.chunks: List[Dict[str, Any]] = []
-
-        # BM25インデックス本体。load_index() が呼ばれるまではNoneのまま。
         self.bm25: Optional[BM25Okapi] = None
 
     def _safe_append(
@@ -285,13 +277,13 @@ class Indexer:
     ) -> None:
         """
         テキストを max_chunk_size 以下の断片に強制的に分割してから
-        chunks リストへ追加する安全弁（セーフガード）。
+        chunks リストへ追加する安全弁
 
         chunk_python_code / chunk_markdown_text は「行」や「段落」を
         単位に積み上げていくが、1行・1段落自体が max_chunk_size を
-        超える場合（長いコード行や長大な段落）がありうる。
+        超える場合（長いコード行や長大な段落）がありうる
         このメソッドはそのケースでも必ず max_chunk_size 以下の
-        チャンクだけが出力されるように、文字単位でスライスし直す。
+        チャンクだけが出力されるように、文字単位でスライスし直す
 
         Args:
             chunks: 追加先のチャンクリスト（呼び出し元が保持するリストを
@@ -302,15 +294,10 @@ class Indexer:
         """
         idx = 0
         while idx < len(text):
-            # [idx : idx+max_chunk_size) の範囲を切り出す。
-            # Pythonのスライスは範囲外でもエラーにならないため、
-            # 末尾でも安全に扱える。
             chunk_slice = text[idx:idx + self.max_chunk_size]
             chunks.append({
                 "file_path": file_path,
                 "first_character_index": start_idx + idx,
-                # inclusive（両端を含む）なインデックスにするため -1 する。
-                # 例: 2000文字のチャンクなら [0, 1999] になる。
                 "last_character_index": start_idx + idx + len(chunk_slice) - 1,
                 "text": chunk_slice
             })
@@ -339,22 +326,17 @@ class Indexer:
         chunks: List[Dict[str, Any]] = []
         lines = text.split('\n')
         current_chunk = ""
-        # current_chunk の先頭がファイル全体の何文字目から始まるか
         start_idx = 0
 
         for i, line in enumerate(lines):
-            # split('\n') で失われる改行文字を、最後の行以外には復元する
             line_text = line + '\n' if i < len(lines) - 1 else line
             line_len = len(line_text)
 
-            # この行を足すと上限を超えてしまう場合は、
-            # 現在たまっている current_chunk を先に確定させる
             if len(current_chunk) + line_len > self.max_chunk_size \
                and current_chunk:
                 self._safe_append(
                     chunks, str(file_path), start_idx, current_chunk
                 )
-                # 次のチャンクの開始位置を更新してからリセット
                 start_idx += len(current_chunk)
                 current_chunk = ""
 
@@ -450,8 +432,6 @@ class Indexer:
         ]
 
         if not heading_starts:
-            # 見出しが1つも見つからない場合（前文のみのファイルなど）は、
-            # 段落ベースの戦略にそのままフォールバックする。
             return self.chunk_markdown_text(text, file_path)
 
         # テキスト全体を、見出し開始位置を境界とした連続区間
@@ -495,7 +475,7 @@ class Indexer:
 
         return chunks
 
-    def _walk_corpus_files(self, target_extensions: set) -> List[Path]:
+    def _walk_corpus_files(self, target_extensions: set[str]) -> List[Path]:
         """
         コーパスディレクトリを走査し、対象拡張子を持つファイルのパスの
         リストを返す。
@@ -693,7 +673,7 @@ class Indexer:
         if not self.skip_vector and all_search_texts:
             print("Computing semantic embeddings (Vector)...")
             embed_start_time = time.time()
-            
+
             # 埋め込み計算用の軽量モデル（CPUで動くもの）をロード。
             # 実際に埋め込みが必要な場合のみロードすることで、
             # 変更ファイルが0件の再実行時にモデルロードコストすら
@@ -709,7 +689,7 @@ class Indexer:
             )
             for str_path, start, end in file_slices:
                 new_embeddings_by_file[str_path] = all_embeddings[start:end]
-            
+
             vector_time = time.time() - embed_start_time
         elif self.skip_vector and all_search_texts:
             print("Skipping semantic embeddings (Vector) computation...")
@@ -778,7 +758,7 @@ class Indexer:
             f"Incremental indexing complete. "
             f"Total chunks: {len(self.chunks)}"
         )
-        
+
         print("\n⏱️ Indexing Time Breakdown:")
         print(f"  - Lexical (Chunking & Setup): {lexical_time:.2f} seconds")
         if not self.skip_vector:
