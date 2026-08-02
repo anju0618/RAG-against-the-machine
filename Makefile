@@ -14,23 +14,18 @@ debug:
 
 clean:
 	@echo "Cleaning cache and temporary files..."
-	# Pythonのコンパイル済みキャッシュを完全に削除[cite: 1]
 	find . -type d -name "__pycache__" -exec rm -rf {} +
 	find . -type f -name "*.pyc" -delete
 	find . -type f -name "*.pyo" -delete
 	find . -type f -name "*.pyd" -delete
-	# OSやエディタが自動生成する一時ファイルを削除
 	find . -type f -name ".DS_Store" -delete
 	find . -type f -name "*~" -delete
-	# 各種ツールのキャッシュディレクトリを削除
 	rm -rf .mypy_cache .ruff_cache .pytest_cache .coverage htmlcov $(SRC_DIR)/__pycache__
 
 fclean: clean
 	@echo "Performing full clean..."
 	rm -rf .venv
-	# .gitkeep は残しつつ、生成された検索結果・回答の JSON を削除
 	find data/output -type f -name "*.json" -delete
-	# .gitkeep は残しつつ、indexerが生成した重いインデックスデータ（chunks.json, embeddings.npy など）を削除
 	find data/processed -type f -not -name ".gitkeep" -delete
 
 lint:
