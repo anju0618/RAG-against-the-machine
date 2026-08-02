@@ -54,6 +54,7 @@ indexer.py
 import json
 import os
 import re
+import time
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple, cast
 from tqdm import tqdm
@@ -229,7 +230,7 @@ class Indexer:
     再チャンク・再埋め込みし、既存のチャンク/埋め込みは使い回す。
     """
 
-    def __init__(self, max_chunk_size: int = 2000) -> None:
+    def __init__(self, max_chunk_size: int = 2000, skip_vector: bool = False) -> None:
         """
         Indexerを初期化する。
 
@@ -241,8 +242,11 @@ class Indexer:
                 なお、チャンクサイズを大きく保つほど総チャンク数が減り、
                 埋め込み計算量も減るため、精度が許す限り上限値
                 （2000文字）を使うのがインデックス作成速度の観点でも有利。
+            skip_vector: Trueの場合、Vector（埋め込み）計算をスキップする。
+                必須パート（Lexicalのみ）の評価時に5分ルールを安全に満たすためのフラグ。
         """
         self.max_chunk_size = max_chunk_size
+        self.skip_vector = skip_vector
 
         # コーパスのルートディレクトリ。
         # 特定のバージョン名（例: "vllm-0.10.1"）をハードコードすると、
@@ -552,6 +556,8 @@ class Indexer:
         Raises:
             FileNotFoundError: self.corpus_dir が存在しない場合
         """
+        start_time = time.time()
+
         if not self.corpus_dir.exists():
             raise FileNotFoundError(f"Directory not found: {self.corpus_dir}")
 
@@ -652,6 +658,9 @@ class Indexer:
                 # インデックス作成全体を止めないようにする
                 continue
 
+        chunking_end_time = time.time()
+        lexical_time = chunking_end_time - start_time
+
         # --- 新規・変更ファイルの埋め込み計算 ---
         # ここが以前の実装で最も遅かった箇所。
         # 「ファイルごとに小さいバッチでencode()を呼ぶ」のではなく、
@@ -680,7 +689,11 @@ class Indexer:
             )
             file_slices.append((str_path, start, len(all_search_texts)))
 
-        if all_search_texts:
+        vector_time = 0.0
+        if not self.skip_vector and all_search_texts:
+            print("Computing semantic embeddings (Vector)...")
+            embed_start_time = time.time()
+            
             # 埋め込み計算用の軽量モデル（CPUで動くもの）をロード。
             # 実際に埋め込みが必要な場合のみロードすることで、
             # 変更ファイルが0件の再実行時にモデルロードコストすら
@@ -696,6 +709,10 @@ class Indexer:
             )
             for str_path, start, end in file_slices:
                 new_embeddings_by_file[str_path] = all_embeddings[start:end]
+            
+            vector_time = time.time() - embed_start_time
+        elif self.skip_vector and all_search_texts:
+            print("Skipping semantic embeddings (Vector) computation...")
 
         # --- 既存データと新規データの結合・再構築 ---
         # 最終的な chunks / embeddings を1つのリストにまとめ直す。
@@ -734,14 +751,19 @@ class Indexer:
                 for i, chunk in enumerate(chunks):
                     final_chunks.append(chunk)
                     final_embeddings_list.append(embs[i])
+            elif chunks and self.skip_vector:
+                # Vectorをスキップした場合、既存の引き継ぎ分の長さに合わせて0埋めするか、
+                # または新しいチャンクだけ追加する（ロード時にフォールバックするため問題ない）
+                for i, chunk in enumerate(chunks):
+                    final_chunks.append(chunk)
 
         self.chunks = final_chunks
-        if final_embeddings_list:
+        if final_embeddings_list and not self.skip_vector:
             final_embeddings = np.array(final_embeddings_list)
         else:
-            # チャンクが1件もない場合でも、埋め込み次元(384)だけ
-            # 合わせた空配列を保存しておくことで、後続のロード処理が
-            # shape不一致で落ちないようにする。
+            # チャンクが1件もない場合やVectorスキップ時でも、
+            # 埋め込み次元(384)だけ合わせた空配列を保存しておくことで、
+            # 後続のロード処理がshape不一致で落ちないようにする。
             final_embeddings = np.zeros((0, 384))
 
         # ディスクへ永続化
@@ -750,10 +772,18 @@ class Indexer:
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(current_files, f, ensure_ascii=False, indent=2)
 
+        total_time = time.time() - start_time
+
         print(
             f"Incremental indexing complete. "
             f"Total chunks: {len(self.chunks)}"
         )
+        
+        print("\n⏱️ Indexing Time Breakdown:")
+        print(f"  - Lexical (Chunking & Setup): {lexical_time:.2f} seconds")
+        if not self.skip_vector:
+            print(f"  - Vector (Embedding): {vector_time:.2f} seconds")
+        print(f"  - Total Time: {total_time:.2f} seconds\n")
 
     def save_index(self) -> None:
         """

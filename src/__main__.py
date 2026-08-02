@@ -38,7 +38,7 @@ class RAGCLI:
     各public methodがそのままサブコマンドになる。
     """
 
-    def index(self, max_chunk_size: int = 2000, debug: bool = False) -> None:
+    def index(self, max_chunk_size: int = 2000, skip_vector: bool = False, debug: bool = False) -> None:
         """
         コーパス（data/raw/ 配下）を読み込み、チャンクに分割して
         インデックスを構築・保存する。
@@ -52,7 +52,7 @@ class RAGCLI:
             出すだけに留める（CLIが未処理の例外でクラッシュしないため）。
         """
         try:
-            indexer = Indexer(max_chunk_size=max_chunk_size)
+            indexer = Indexer(max_chunk_size=max_chunk_size, skip_vector=skip_vector)
             indexer.index_corpus()
             if debug:
                 print(
