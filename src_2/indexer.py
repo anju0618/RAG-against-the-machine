@@ -120,7 +120,7 @@ _CAMEL_BOUNDARY_2 = re.compile(r"(?<=[A-Z])(?=[A-Z][a-z])")
 # 注意: BGEモデルは「クエリ側にだけ」検索用の指示文（instruction）を
 # 付与することを推奨している（パッセージ/チャンク側には付与しない）。
 # この指示文は retriever.py の QUERY_INSTRUCTION_PREFIX で付与される。
-EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
+EMBEDDING_MODEL_NAME = "BAAI/bge-small-en-v1.5"
 
 # EMBEDDING_MODEL_NAME の出力次元。embeddings.npy の空配列や
 # プレースホルダーベクトルの形状を決めるのに使う。
@@ -221,8 +221,8 @@ def build_search_text(file_path: str, text: str) -> str:
     Returns:
         ファイル名ヒントを付与した検索用テキスト
     """
-    path_hint = re.sub(r'[/\\_.-]', ' ', file_path)
-    return f"{path_hint}\n{text}"
+    name_hint = Path(file_path).stem.replace("_", " ").replace("-", " ")
+    return f"{name_hint}\n{text}"
 
 
 def _encode_texts(
@@ -230,7 +230,7 @@ def _encode_texts(
     texts: List[str],
     cpu_count: Optional[int],
     use_multiprocess: bool = True,
-    batch_size: int = 32,
+    batch_size: int = 128,
 ) -> np.ndarray:
     """
     埋め込み計算の中で最もコストの高い部分

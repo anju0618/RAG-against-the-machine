@@ -49,7 +49,9 @@ from src.indexer import EMBEDDING_MODEL_NAME, build_search_text, tokenize_text
 # 「クエリ側にのみ」この指示文を付与すると精度が上がることが知られている
 # （パッセージ/チャンク側には付与しない）。indexer.py 側でチャンクの
 # 埋め込みを計算する際にはこの指示文を使っていないことに注意。
-QUERY_INSTRUCTION_PREFIX = ""
+QUERY_INSTRUCTION_PREFIX = (
+    "Represent this sentence for searching relevant passages: "
+)
 
 
 class Retriever:
