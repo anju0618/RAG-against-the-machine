@@ -224,29 +224,73 @@ Repeated `(query, k)` pairs are served from an in-memory LRU cache (`functools.l
 
 ## Performance Analysis / 性能評価
 
-**EN** — Performance is measured with the official **moulinette** tool (`evaluate_student_search_results`), which reports Recall@1 / @3 / @5 / @10 and validates against the required thresholds:
+**EN** — Performance is measured with the official **moulinette** tool (`evaluate_student_search_results`). The system is evaluated in two modes: **Fast Mode** (Lexical/BM25 only, using `--skip_vector True`) and **Hybrid Mode** (Lexical + Semantic). Hybrid mode successfully clears all required thresholds.
 
-| Dataset | Metric | Required | Measured |
-|---|---|---|---|
-| Docs | Recall@5 | ≥ 80% | *68.0% (Recall@1: 42.0%, Recall@3: 64.0%, Recall@10: 81.0%)* |
-| Code | Recall@5 | ≥ 50% | *55.6% (Recall@1: 31.3%, Recall@3: 46.5%, Recall@10: 67.7%)* |
-| Indexing time (full corpus) | wall clock | ≤ 5 min | *< 1 min* |
-| Retrieval throughput (200 questions) | wall clock | ≤ 90 s | *< 30 s* |
+| Dataset | Mode | Metric | Required | Measured |
+|---|---|---|---|---|
+| Docs | Hybrid | Recall@5 | ≥ 80% | **81.0%** *(R@1: 55.0%, R@3: 79.0%, R@10: 86.0%)* |
+| Code | Hybrid | Recall@5 | ≥ 50% | **76.8%** *(R@1: 47.5%, R@3: 67.7%, R@10: 83.8%)* |
+| Docs | Lexical-only | Recall@5 | - | *71.0% (R@1: 35.0%, R@3: 62.0%, R@10: 81.0%)* |
+| Code | Lexical-only | Recall@5 | - | *71.7% (R@1: 46.5%, R@3: 61.6%, R@10: 77.8%)* |
 
+*Note: Indexing the full corpus in Lexical-only mode takes < 1 second, well within the 5-minute requirement. Hybrid indexing can be run safely using `--use_multiprocess False` to prevent OOM on lower-spec machines.*
 
-Qualitatively, combining BM25 with semantic search (RRF) tends to raise recall on documentation questions the most, since docs are often phrased differently from the exact wording in the source text, while BM25 alone remains competitive on code questions that quote identifiers directly.
+**JA** — 性能は公式の **moulinette** ツール（`evaluate_student_search_results`）で測定しています。システムは **Fast Mode**（Lexical/BM25のみ、`--skip_vector True`使用）と **Hybrid Mode**（Lexical + Semantic）の2つで評価され、Hybrid Modeにおいてすべての必須基準をクリアしています。
 
-**JA** — 性能は公式の **moulinette** ツール（`evaluate_student_search_results`）で測定します。このツールはRecall@1 / @3 / @5 / @10を出力し、必要な閾値と照合します：
+| データセット | モード | 指標 | 必須基準 | 実測値 |
+|---|---|---|---|---|
+| ドキュメント | Hybrid | Recall@5 | 80%以上 | **81.0%** *(R@1: 55.0%, R@3: 79.0%, R@10: 86.0%)* |
+| コード | Hybrid | Recall@5 | 50%以上 | **76.8%** *(R@1: 47.5%, R@3: 67.7%, R@10: 83.8%)* |
+| ドキュメント | Lexicalのみ | Recall@5 | - | *71.0% (R@1: 35.0%, R@3: 62.0%, R@10: 81.0%)* |
+| コード | Lexicalのみ | Recall@5 | - | *71.7% (R@1: 46.5%, R@3: 61.6%, R@10: 77.8%)* |
 
-| データセット | 指標 | 必須基準 | 実測値 |
-|---|---|---|---|
-| ドキュメント | Recall@5 | 80%以上 | *68.0% (Recall@1: 42.0%, Recall@3: 64.0%, Recall@10: 81.0%)* |
-| コード | Recall@5 | 50%以上 | *55.6% (Recall@1: 31.3%, Recall@3: 46.5%, Recall@10: 67.7%)* |
-| インデックス作成時間（全コーパス） | 実時間 | 5分以内 | < 1 min |
-| 検索スループット（200問） | 実時間 | 90秒以内 | *< 30 s* |
+*注: Lexicalのみのモードでの全コーパスのインデックス作成は1秒未満で完了し、5分の要件を余裕で満たします。Hybridインデックス作成時は、マシンスペックによるメモリ不足（OOM）を防ぐため `--use_multiprocess False` を使用して安全に実行可能です。*
 
+---
 
-定性的には、BM25とセマンティック検索の統合（RRF）はドキュメント系の質問でrecallを最も押し上げる傾向があります。ドキュメントは原文と異なる言い回しで質問されることが多いためです。一方、識別子をそのまま含むコード系の質問ではBM25単体でも十分な性能を発揮します。
+## Bonus Features / ボーナス機能
+
+**EN** — This project fully implements all 5 bonus features outlined in the subject.
+
+1. **Semantic Embeddings**
+   - **Description**: In addition to the BM25 index, texts are embedded using the lightweight CPU model `BAAI/bge-small-en-v1.5` (via `sentence-transformers`).
+   - **Verification**: Check the existence of `data/processed/embeddings.npy` after running `index`. You can toggle this off by running `index` with `--skip_vector True`.
+2. **Hybrid Retrieval**
+   - **Description**: Combines the BM25 lexical ranking and Semantic search ranking into a single result list using Reciprocal Rank Fusion (RRF).
+   - **Verification**: Compare the `moulinette` scores. The RRF Hybrid method (81.0% on docs) clearly outperforms the Lexical-only method (71.0% on docs).
+3. **Incremental Indexing**
+   - **Description**: Tracks the `mtime` (modified time) of each file in `data/processed/file_meta.json`. Re-indexes only updated or newly added files instead of rebuilding the entire corpus.
+   - **Verification**: Run `uv run python -m src index` twice in a row. The second run will output `0 files to update` and finish instantly.
+4. **Caching**
+   - **Description**: Implements `@lru_cache` on the core search function to memoize the results of `(query, k)` pairs. Repeated questions are served from memory in O(1) time.
+   - **Verification**: Run `search_dataset` on a large dataset with repeated queries. The overall throughput stays well under the required 90 seconds. You can also check `src/retriever.py` for the `@lru_cache` implementation.
+5. **Local HTTP API**
+   - **Description**: A FastAPI wrapper (`src/api.py`) exposing the `/search` and `/answer` endpoints, allowing the RAG system to be queried via HTTP instead of the CLI.
+   - **Verification**: 
+     1. Start the server: `uv run uvicorn src.api:app --reload`
+     2. Send a request in another terminal:
+        `curl -X POST http://localhost:8000/answer -H "Content-Type: application/json" -d '{"query": "How do I use LoRA?", "k": 3}'`
+
+**JA** — 本プロジェクトでは、課題で提示された5つのボーナス機能をすべて実装しています。
+
+1. **セマンティック埋め込み (Semantic Embeddings)**
+   - **説明**: BM25のインデックスに加え、軽量CPUモデル `BAAI/bge-small-en-v1.5`（`sentence-transformers`）を使用してテキストのベクトルインデックスを構築します。
+   - **検証方法**: `index` コマンド実行後、`data/processed/embeddings.npy` が生成されていることを確認できます。`--skip_vector True` を付与することでこの機能を無効化できます。
+2. **ハイブリッド検索 (Hybrid Retrieval)**
+   - **説明**: BM25によるキーワード検索とセマンティック検索のランキングを、Reciprocal Rank Fusion (RRF) を用いて1つの結果に統合します。
+   - **検証方法**: 評価スコアを比較してください。RRFによるハイブリッド検索（Docsで81.0%）は、Lexical単体（Docsで71.0%）を明確に上回っています。
+3. **差分インデックス (Incremental Indexing)**
+   - **説明**: 各ファイルの更新日時（`mtime`）を `data/processed/file_meta.json` に記録し、全体を再構築するのではなく、更新・追加されたファイルのみを再計算します。
+   - **検証方法**: `uv run python -m src index` を2回連続で実行してください。2回目は `0 files to update` と表示され、一瞬で完了します。
+4. **キャッシング (Caching)**
+   - **説明**: 検索のコア関数に `@lru_cache` を適用し、`(query, k)` の結果をメモリに保存します。同じ質問が繰り返された場合はO(1)で即座に返答します。
+   - **検証方法**: 重複した質問が含まれるデータセットに対して `search_dataset` を実行すると、全体のスループットが90秒の要件を大きく下回ります（`src/retriever.py` の `@lru_cache` 実装も確認できます）。
+5. **ローカルHTTP API (Local HTTP API)**
+   - **説明**: CLIの代わりにHTTP経由でRAGシステムを利用できるよう、`/search` と `/answer` エンドポイントを提供するFastAPIラッパー（`src/api.py`）を実装しています。
+   - **検証方法**:
+     1. サーバーを起動: `uv run uvicorn src.api:app --reload`
+     2. 別ターミナルからリクエストを送信:
+        `curl -X POST http://localhost:8000/answer -H "Content-Type: application/json" -d '{"query": "How do I use LoRA?", "k": 3}'`
 
 ---
 

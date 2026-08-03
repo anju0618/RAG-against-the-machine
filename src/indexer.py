@@ -122,6 +122,11 @@ _CAMEL_BOUNDARY_2 = re.compile(r"(?<=[A-Z])(?=[A-Z][a-z])")
 # この指示文は retriever.py の QUERY_INSTRUCTION_PREFIX で付与される。
 EMBEDDING_MODEL_NAME = "BAAI/bge-small-en-v1.5"
 
+# EMBEDDING_MODEL_NAME の出力次元。embeddings.npy の空配列や
+# プレースホルダーベクトルの形状を決めるのに使う。
+# モデルを変更する場合はこの値も実際の出力次元に合わせること。
+EMBEDDING_DIM = 384
+
 # 見出し（ATX形式の "#" 〜 "######"）を検出するための正規表現。
 # Markdownのチャンキングを「空行区切りの段落」だけでなく
 # 「見出しセクション」単位でも行えるようにするために使う
@@ -220,6 +225,90 @@ def build_search_text(file_path: str, text: str) -> str:
     return f"{name_hint}\n{text}"
 
 
+def _encode_texts(
+    embed_model: SentenceTransformer,
+    texts: List[str],
+    cpu_count: Optional[int],
+    use_multiprocess: bool = True,
+    batch_size: int = 128,
+) -> np.ndarray:
+    """
+    埋め込み計算の中で最もコストの高い部分
+    （大量のチャンクに対する embed_model.encode() 呼び出し）を実行する
+    ヘルパー関数。
+
+    チャンクごとの埋め込み計算は互いに独立している
+    （embarrassingly parallel）ため、複数CPUコアを持つ環境では
+    SentenceTransformer のマルチプロセスAPIを使うことで、
+    コア数に応じたほぼ線形の高速化が期待できる。
+
+    ただし、マルチプロセスAPIの挙動はsentence-transformersの
+    バージョンや実行環境（コンテナの権限設定など）によって
+    差があり、必ずしも全環境で使えるとは限らない。そのため、
+    何らかの理由で失敗した場合は例外を握りつぶし、単一プロセスでの
+    バッチ推論に自動的にフォールバックする。
+    「多少遅くても確実にインデックス作成が完走すること」を、
+    「マルチプロセスによる高速化」よりも優先している。
+
+    Args:
+        embed_model: ロード済みのSentenceTransformerインスタンス
+        texts: 埋め込みたいテキストのリスト
+        cpu_count: 利用可能なCPUコア数（os.cpu_count()の結果）
+        use_multiprocess: マルチプロセス化を試みるかどうか
+        batch_size: 1バッチあたりのテキスト数
+
+    Returns:
+        テキストと同じ順序・同じ件数の埋め込みベクトル配列
+        （正規化済み、shape: (len(texts), EMBEDDING_DIM)）
+    """
+    if not texts:
+        return np.zeros((0, EMBEDDING_DIM), dtype=np.float32)
+
+    if use_multiprocess and cpu_count and cpu_count > 1:
+        try:
+            # マルチプロセス実行時、各ワーカープロセス内でBLAS/torchが
+            # さらに複数スレッドを使おうとすると、プロセス数×スレッド数で
+            # CPUコアを奪い合ってしまう（オーバーサブスクリプション）。
+            # そのため、ワーカー側は1スレッドに制限する。
+            torch.set_num_threads(1)
+            pool = embed_model.start_multi_process_pool(
+                target_devices=["cpu"] * cpu_count
+            )
+            try:
+                raw_embeddings = embed_model.encode_multi_process(
+                    texts, pool, batch_size=batch_size,
+                )
+            finally:
+                embed_model.stop_multi_process_pool(pool)
+
+            # encode_multi_process は normalize_embeddings 引数を
+            # サポートしないバージョンがあるため、正規化はここで
+            # 明示的に行う（コサイン類似度をnp.dotで計算するために必要）。
+            mp_embeddings: np.ndarray = np.asarray(raw_embeddings)
+            norms = np.linalg.norm(mp_embeddings, axis=1, keepdims=True)
+            norms[norms == 0] = 1.0
+            result: np.ndarray = (mp_embeddings / norms).astype(np.float32)
+            return result
+        except Exception as e:
+            print(
+                "Warning: multi-process embedding failed "
+                f"({e}); falling back to single-process encoding."
+            )
+
+    # フォールバック（またはマルチプロセスを使わない設定の場合）:
+    # 単一プロセスでバッチ推論する。この場合はtorchに全コアを
+    # 使わせることで、1バッチあたりの行列演算を並列化する。
+    if cpu_count:
+        torch.set_num_threads(cpu_count)
+    raw_single = embed_model.encode(
+        texts,
+        batch_size=batch_size,
+        normalize_embeddings=True,
+        show_progress_bar=True,
+    )
+    return np.asarray(raw_single, dtype=np.float32)
+
+
 class Indexer:
     """
     BM25Okapi（キーワード検索）と SentenceTransformer（埋め込みベクトル）を
@@ -233,7 +322,8 @@ class Indexer:
     def __init__(
             self,
             max_chunk_size: int = 2000,
-            skip_vector: bool = False
+            skip_vector: bool = False,
+            use_multiprocess: bool = True,
             ) -> None:
         """
         Indexerを初期化する。
@@ -247,10 +337,34 @@ class Indexer:
                 埋め込み計算量も減るため、精度が許す限り上限値
                 （2000文字）を使うのがインデックス作成速度の観点でも有利。
             skip_vector: Trueの場合、Vector（埋め込み）計算をスキップする。
-                必須パート（Lexicalのみ）の評価時に5分ルールを安全に満たすためのフラグ。
+                チャンキングやBM25まわりを素早く試したいときの
+                開発用の高速モード（埋め込みモデルのダウンロード・推論を
+                待たずに済む）。
+
+                重要: recall@5の合格基準（docs 80%、code 50%）は
+                BM25単体では届かないことを実測済み（本プロジェクトの
+                検証ではBM25のみで70%前後）。そのため、**採点に使う
+                最終的なインデックスはこのフラグを付けずに
+                （＝Vectorも計算した状態で）作成すること**。
+                skip_vectorはあくまで開発中の時短用であり、
+                本番のインデックスをこれで代用してはいけない。
+
+                なお、skip_vector中に新規・更新されたチャンクは
+                埋め込み未計算のまま保存されるが、後で
+                skip_vectorなしの `index` を再実行すれば、
+                既に計算済みのチャンクを再計算することなく、
+                不足分だけを自動的に埋め込み計算する
+                （index_corpus内のコメント参照）。
+            use_multiprocess: Trueの場合、埋め込み計算を複数のCPU
+                プロセスに分散して高速化を試みる（詳細は
+                _encode_texts 参照）。マルチプロセス化に失敗した
+                場合は自動的に単一プロセスの推論にフォールバックする
+                ため、Falseにするのは主にデバッグ用途や、
+                マルチプロセス化がかえって不安定になる環境向け。
         """
         self.max_chunk_size = max_chunk_size
         self.skip_vector = skip_vector
+        self.use_multiprocess = use_multiprocess
         self.corpus_dir = Path("data/raw")
         self.processed_dir = Path("data/processed")
 
@@ -526,12 +640,17 @@ class Indexer:
           - .git 等の無関係なディレクトリを走査しない
             （_walk_corpus_files 参照）
           - 埋め込み計算を「ファイルごとに何度も」ではなく
-            「今回処理する全ファイル分をまとめて1回」呼び出す
+            「今回埋め込みが必要なチャンク全体をまとめて1回」呼び出す
             （SentenceTransformer.encode() の呼び出しオーバーヘッドは
             バッチが小さいほど相対的に大きくなるため、まとめることで
             大幅に高速化できる）
-          - torch のスレッド数をCPUコア数に合わせて設定し、
-            CPU上でのバッチ推論の並列度を上げる
+          - 複数CPUコアがある環境では、埋め込み計算をマルチプロセス化
+            して並列実行を試みる（失敗時は単一プロセスに自動フォールバック。
+            詳細は _encode_texts 参照）
+          - skip_vector=True の場合は埋め込み計算自体を行わない
+            （BM25のみの高速な開発用インデックス作成。ただし採点用の
+            最終インデックスには使わないこと。__init__のskip_vectorの
+            説明を参照）
 
         Raises:
             FileNotFoundError: self.corpus_dir が存在しない場合
@@ -540,13 +659,6 @@ class Indexer:
 
         if not self.corpus_dir.exists():
             raise FileNotFoundError(f"Directory not found: {self.corpus_dir}")
-
-        # CPU環境でのバッチ推論を高速化するため、利用可能な全コアを
-        # torchに使わせる。GPUがある環境では影響しない設定なので、
-        # 常に呼び出しておいて問題ない。
-        cpu_count = os.cpu_count()
-        if cpu_count:
-            torch.set_num_threads(cpu_count)
 
         # 出力先ディレクトリを用意（既にあってもエラーにしない）
         self.processed_dir.mkdir(parents=True, exist_ok=True)
@@ -641,63 +753,17 @@ class Indexer:
         chunking_end_time = time.time()
         lexical_time = chunking_end_time - start_time
 
-        # --- 新規・変更ファイルの埋め込み計算 ---
-        # ここが以前の実装で最も遅かった箇所。
-        # 「ファイルごとに小さいバッチでencode()を呼ぶ」のではなく、
-        # 今回処理する全ファイル・全チャンクのテキストを1つの巨大な
-        # リストにまとめてから、1回（内部的には指定したbatch_sizeで
-        # 自動分割されるが、呼び出し自体は1回）だけ encode() を呼ぶ。
-        # モデルのフォワードパス自体はバッチが大きいほど効率的なうえ、
-        # Python関数呼び出し自体のオーバーヘッドも「ファイル数分」から
-        # 「1回」に削減されるため、ファイル数が多いコーパスほど
-        # 高速化の効果が大きい。
-        new_embeddings_by_file: Dict[str, np.ndarray] = {}
-
-        # (ファイルパス, このファイルの開始位置, 終了位置) を記録しておき、
-        # 一括で計算した埋め込み配列を後でファイルごとに切り分けられるようにする
-        file_slices: List[Tuple[str, int, int]] = []
-        all_search_texts: List[str] = []
-
-        for str_path, chunks in new_chunks_by_file.items():
-            if not chunks:
-                continue
-            start = len(all_search_texts)
-            # 埋め込み計算にはファイル名ヒントを付与した検索用テキストを使う
-            # （chunks.jsonに保存される "text" 自体は変更しない）
-            all_search_texts.extend(
-                build_search_text(str_path, c["text"]) for c in chunks
-            )
-            file_slices.append((str_path, start, len(all_search_texts)))
-
-        vector_time = 0.0
-        if not self.skip_vector and all_search_texts:
-            print("Computing semantic embeddings (Vector)...")
-            embed_start_time = time.time()
-
-            # 埋め込み計算用の軽量モデル（CPUで動くもの）をロード。
-            # 実際に埋め込みが必要な場合のみロードすることで、
-            # 変更ファイルが0件の再実行時にモデルロードコストすら
-            # 発生しないようにしている。
-            embed_model = SentenceTransformer(
-                EMBEDDING_MODEL_NAME, device="cpu"
-            )
-            all_embeddings = embed_model.encode(
-                all_search_texts,
-                batch_size=128,
-                normalize_embeddings=True,
-                show_progress_bar=True,
-            )
-            for str_path, start, end in file_slices:
-                new_embeddings_by_file[str_path] = all_embeddings[start:end]
-
-            vector_time = time.time() - embed_start_time
-        elif self.skip_vector and all_search_texts:
-            print("Skipping semantic embeddings (Vector) computation...")
-
-        # --- 既存データと新規データの結合・再構築 ---
-        # 最終的な chunks / embeddings を1つのリストにまとめ直す。
+        # --- チャンクとembeddingsを「1件ずつ対応付けながら」結合する ---
+        # 以前の実装は「チャンクのリスト」と「embeddingsのリスト」を
+        # 別々に組み立てていたため、skip_vector使用時に両者の件数が
+        # ズレてしまい、埋め込みが壊れる／消えるバグがあった。
+        #
+        # ここでは final_chunks と embeddings_for_chunks
+        # （Noneは「まだ埋め込み未計算」を意味するプレースホルダー）を
+        # 必ず同じ長さ・同じ順序で組み立てることで、そのズレを
+        # 構造的に起こりえないようにしている。
         final_chunks: List[Dict[str, Any]] = []
-        final_embeddings_list: List[np.ndarray] = []
+        embeddings_for_chunks: List[Optional[np.ndarray]] = []
 
         if (
             existing_chunks
@@ -722,29 +788,113 @@ class Indexer:
                     continue
                 for chunk, emb in pairs:
                     final_chunks.append(chunk)
-                    final_embeddings_list.append(emb)
+                    # 全要素が0のベクトルは「以前のskip_vector実行時に
+                    # 埋め込みを計算できなかったチャンク」の目印として
+                    # 扱う（本物の埋め込みが偶然すべて0になることは
+                    # 実質的にありえない）。そのため、この場合は
+                    # Noneに変換し、今回のembedding計算対象に含める。
+                    if emb is not None and np.any(emb):
+                        embeddings_for_chunks.append(emb)
+                    else:
+                        embeddings_for_chunks.append(None)
+        elif existing_chunks:
+            # embeddings.npy が存在しない/壊れている/件数が合わない場合でも、
+            # chunks.json 自体は信頼できるデータなので、チャンクだけは
+            # 引き継ぎ、埋め込みは「未計算」として扱う
+            # （後段でまとめて計算対象になる）。
+            for chunk in existing_chunks:
+                fpath = chunk["file_path"]
+                if fpath in deleted_files or fpath in new_chunks_by_file:
+                    continue
+                final_chunks.append(chunk)
+                embeddings_for_chunks.append(None)
 
-        # 新規・更新分を追加
+        # 新規・更新分のチャンクを追加する（常に埋め込み未計算＝None）
         for str_path, chunks in new_chunks_by_file.items():
-            if chunks and str_path in new_embeddings_by_file:
-                embs = new_embeddings_by_file[str_path]
-                for i, chunk in enumerate(chunks):
-                    final_chunks.append(chunk)
-                    final_embeddings_list.append(embs[i])
-            elif chunks and self.skip_vector:
-                # Vectorをスキップした場合、既存の引き継ぎ分の長さに合わせて0埋めするか、
-                # または新しいチャンクだけ追加する（ロード時にフォールバックするため問題ない）
-                for i, chunk in enumerate(chunks):
-                    final_chunks.append(chunk)
+            for chunk in chunks:
+                final_chunks.append(chunk)
+                embeddings_for_chunks.append(None)
 
         self.chunks = final_chunks
-        if final_embeddings_list and not self.skip_vector:
-            final_embeddings = np.array(final_embeddings_list)
+
+        # --- 埋め込み計算 -----------------------------------------------
+        # embeddings_for_chunks の中でNoneのままの位置＝
+        # 「まだ有効な埋め込みを持っていないチャンク」を集めて、
+        # 必要な分だけまとめて計算する。
+        # これにより:
+        #   - 通常の差分インデックス実行では、変更のあったファイル分だけ
+        #     計算する（従来通り）
+        #   - skip_vector実行の後に通常実行(skip_vectorなし)をすると、
+        #     以前skip_vectorで埋め込み未計算だったチャンクだけが
+        #     自動的に埋め込み計算の対象になる（再チャンクは不要）
+        missing_indices = [
+            i for i, e in enumerate(embeddings_for_chunks) if e is None
+        ]
+        vector_time = 0.0
+
+        if self.skip_vector:
+            if missing_indices:
+                print(
+                    "Skipping semantic embeddings (Vector) computation "
+                    f"for {len(missing_indices)} new/changed chunk(s) "
+                    "(--skip_vector). Run `index` without --skip_vector "
+                    "later to compute them."
+                )
+            else:
+                print(
+                    "Skipping semantic embeddings (Vector) computation "
+                    "(--skip_vector; nothing was missing anyway)."
+                )
+        elif missing_indices:
+            print(
+                "Computing semantic embeddings (Vector) for "
+                f"{len(missing_indices)} / {len(final_chunks)} chunks..."
+            )
+            embed_start_time = time.time()
+
+            # 埋め込み計算用の軽量モデル（CPUで動くもの）をロード。
+            # 実際に埋め込みが必要な場合のみロードすることで、
+            # 変更ファイルが0件の再実行時にモデルロードコストすら
+            # 発生しないようにしている。
+            embed_model = SentenceTransformer(
+                EMBEDDING_MODEL_NAME, device="cpu"
+            )
+            texts_to_embed = [
+                build_search_text(
+                    final_chunks[i]["file_path"], final_chunks[i]["text"]
+                )
+                for i in missing_indices
+            ]
+            cpu_count = os.cpu_count()
+            new_embs = _encode_texts(
+                embed_model, texts_to_embed, cpu_count,
+                use_multiprocess=self.use_multiprocess,
+            )
+            for pos, i in enumerate(missing_indices):
+                embeddings_for_chunks[i] = new_embs[pos]
+
+            vector_time = time.time() - embed_start_time
         else:
-            # チャンクが1件もない場合やVectorスキップ時でも、
-            # 埋め込み次元(384)だけ合わせた空配列を保存しておくことで、
-            # 後続のロード処理がshape不一致で落ちないようにする。
-            final_embeddings = np.zeros((0, 384))
+            print(
+                "All chunks already have up-to-date embeddings; "
+                "nothing to compute."
+            )
+
+        # --- 最終的なembeddings配列の組み立て ---------------------------
+        # skip_vector中に埋め込みを計算しなかったチャンクは、Noneのまま
+        # 残っている可能性がある。その場合はゼロベクトルで埋めて
+        # 配列の形状（行数がchunks.jsonと一致すること）だけは常に保つ。
+        # ゼロベクトルはコサイン類似度が常に0になるため、BM25側は
+        # 通常通り機能しつつ、セマンティック検索では単に
+        # 上位に来ないだけで、エラーやクラッシュにはつながらない。
+        if final_chunks:
+            final_embeddings = np.array([
+                e if e is not None
+                else np.zeros(EMBEDDING_DIM, dtype=np.float32)
+                for e in embeddings_for_chunks
+            ], dtype=np.float32)
+        else:
+            final_embeddings = np.zeros((0, EMBEDDING_DIM), dtype=np.float32)
 
         # ディスクへ永続化
         self.save_index()
@@ -761,9 +911,21 @@ class Indexer:
 
         print("\n⏱️ Indexing Time Breakdown:")
         print(f"  - Lexical (Chunking & Setup): {lexical_time:.2f} seconds")
-        if not self.skip_vector:
+        if self.skip_vector:
+            print("  - Vector (Embedding): skipped (--skip_vector)")
+        else:
             print(f"  - Vector (Embedding): {vector_time:.2f} seconds")
         print(f"  - Total Time: {total_time:.2f} seconds\n")
+
+        remaining_missing = sum(
+            1 for e in embeddings_for_chunks if e is None
+        )
+        if remaining_missing:
+            print(
+                f"⚠️  {remaining_missing} chunk(s) still have no semantic "
+                "embedding (BM25-only for those until the next `index` "
+                "run without --skip_vector)."
+            )
 
     def save_index(self) -> None:
         """

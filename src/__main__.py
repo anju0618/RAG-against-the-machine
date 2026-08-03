@@ -42,6 +42,7 @@ class RAGCLI:
             self,
             max_chunk_size: int = 2000,
             skip_vector: bool = False,
+            use_multiprocess: bool = True,
             debug: bool = False
             ) -> None:
         """
@@ -50,6 +51,17 @@ class RAGCLI:
 
         Args:
             max_chunk_size: 1チャンクあたりの最大文字数
+            skip_vector: Trueの場合、セマンティック埋め込み(Vector)の
+                計算をスキップし、BM25のみの高速な開発用インデックスを
+                作成する。recall@5の合格基準(docs 80%/code 50%)はBM25
+                単体では届かないことを実測済みのため、**採点に使う
+                最終的なインデックスはこのフラグなしで作り直すこと**。
+                skip_vector実行後に通常実行(このフラグなし)を行うと、
+                埋め込み未計算のチャンクだけが自動的に補完される。
+            use_multiprocess: Trueの場合、埋め込み計算を複数CPU
+                プロセスに分散して高速化を試みる（失敗時は自動的に
+                単一プロセスにフォールバックするため、通常は
+                デフォルトのままでよい）。
             debug: Trueの場合、インデックス化されたチャンク数を表示する
 
         Note:
@@ -59,7 +71,8 @@ class RAGCLI:
         try:
             indexer = Indexer(
                 max_chunk_size=max_chunk_size,
-                skip_vector=skip_vector
+                skip_vector=skip_vector,
+                use_multiprocess=use_multiprocess,
                 )
             indexer.index_corpus()
             if debug:
