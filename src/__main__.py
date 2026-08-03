@@ -42,7 +42,7 @@ class RAGCLI:
             self,
             max_chunk_size: int = 2000,
             skip_vector: bool = False,
-            use_multiprocess: bool = True,
+            use_multiprocess: bool = False,
             debug: bool = False
             ) -> None:
         """
