@@ -151,19 +151,8 @@ class Indexer:
                 （失敗時は単一プロセスに自動フォールバック）。
             target_chunk_size: Markdown（.md/.txt/.rst）チャンクを
                 積み上げる際の「目標」サイズ（ソフトな閾値）。
-                Noneの場合は max(400, max_chunk_size // 2) を使う。
+                Noneの場合は max(400, max_chunk_size // 2) を使う
 
-                なぜmax_chunk_sizeと別に持つか:
-                moulinetteのrecall判定はIoU(重なり率)>0.05を基準にしており、
-                正解データの範囲が数百文字程度なのに対してチャンクが
-                2000文字近くまで大きいと、たとえ正解範囲を完全に
-                含んでいてもIoU（intersection/union）が分母(union)の
-                大きさに引きずられて閾値を割り込みやすくなる。
-                チャンクをより小さく・トピックに集中させることで、
-                この構造的な不利を減らすことを狙っている
-                （Python側のchunk_python_codeはこの値を使わず、
-                従来通りmax_chunk_sizeまで積み上げる＝コード側の
-                recallは既に基準を満たしているため変更していない）。
             chunk_overlap: Markdownチャンクを確定する際に、直前の
                 チャンク末尾からこの文字数だけ次のチャンクの先頭に
                 重複して含める（オーバーラップ）。
@@ -257,17 +246,16 @@ class Indexer:
 
             # ハードな上限(max_chunk_size)ではなく、ソフトな目標サイズ
             # (target_chunk_size)で早めに区切ることで、chunkをより
-            # トピックに集中させ、moulinetteのIoU判定で不利になりにくい
-            # サイズに保つ（詳細は__init__のtarget_chunk_size参照）。
+            # トピックに集中させる
             if len(current_chunk) + para_len > self.target_chunk_size \
                and current_chunk:
                 self._safe_append(
                     chunks, str(file_path), start_idx, current_chunk
                 )
                 # オーバーラップ: 直前チャンクの末尾 chunk_overlap 文字を
-                # 次のチャンクの先頭に重複させて含める。段落境界に
+                # 次のチャンクの先頭に重複させて含める段落境界に
                 # ちょうど正解範囲がまたがっているケースでも、
-                # どちらかのチャンクに収まりやすくなる。
+                # どちらかのチャンクに収まりやすくなる
                 overlap_text = (
                     current_chunk[-self.chunk_overlap:]
                     if self.chunk_overlap > 0 else ""
@@ -312,7 +300,7 @@ class Indexer:
 
             section_len = len(section_text)
             # ハードな上限ではなく、ソフトな目標サイズ(target_chunk_size)
-            # で区切る（chunk_markdown_textと同じ理由。__init__参照）。
+            # で区切る
             if (
                 current_chunk
                 and len(current_chunk) + section_len
