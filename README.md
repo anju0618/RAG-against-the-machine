@@ -224,25 +224,19 @@ Repeated `(query, k)` pairs are served from an in-memory LRU cache (`functools.l
 
 ## Performance Analysis / 性能評価
 
-**EN** — Performance is measured with the official **moulinette** tool (`evaluate_student_search_results`). The system is evaluated in two modes: **Fast Mode** (Lexical/BM25 only, using `--skip_vector True`) and **Hybrid Mode** (Lexical + Semantic). Hybrid mode successfully clears all required thresholds.
+**EN** — Performance is measured with the official **moulinette** tool (`evaluate_student_search_results`). The system successfully clears all required thresholds within the time limit using a Hybrid Retrieval approach (Lexical + Semantic via `all-MiniLM-L6-v2`), enhanced with chunk overlapping and soft-target sizing for optimal markdown grounding.
 
-| Dataset | Mode | Metric | Required | Measured |
+| Dataset (Public) | Mode | Metric | Required | Measured |
 |---|---|---|---|---|
-| Docs | Hybrid | Recall@5 | ≥ 80% | **81.0%** *(R@1: 55.0%, R@3: 79.0%, R@10: 86.0%)* |
-| Code | Hybrid | Recall@5 | ≥ 50% | **76.8%** *(R@1: 47.5%, R@3: 67.7%, R@10: 83.8%)* |
-| Docs | Lexical-only | Recall@5 | - | *71.0% (R@1: 35.0%, R@3: 62.0%, R@10: 81.0%)* |
-| Code | Lexical-only | Recall@5 | - | *71.7% (R@1: 46.5%, R@3: 61.6%, R@10: 77.8%)* |
+| Docs | Hybrid | Recall@5 | ≥ 80% | **85.0%** *(R@1: 55.0%, R@3: 77.0%, R@10: 91.0%)* |
+| Code | Hybrid | Recall@5 | ≥ 50% | **68.7%** *(R@1: 37.4%, R@3: 57.6%, R@10: 79.8%)* |
 
-*Note: Indexing the full corpus in Lexical-only mode takes < 1 second, well within the 5-minute requirement. Hybrid indexing can be run safely using `--use_multiprocess False` to prevent OOM on lower-spec machines.*
+**JA** — 性能は公式の **moulinette** ツール（`evaluate_student_search_results`）で測定しています。システムはHybrid Retrieval（Lexical + `all-MiniLM-L6-v2` によるSemantic）を使用し、Markdownグラウンディングに最適化したチャンクのオーバーラップとソフトターゲットサイズ分けを導入することで、時間制限内にすべての必須基準をクリアしています。
 
-**JA** — 性能は公式の **moulinette** ツール（`evaluate_student_search_results`）で測定しています。システムは **Fast Mode**（Lexical/BM25のみ、`--skip_vector True`使用）と **Hybrid Mode**（Lexical + Semantic）の2つで評価され、Hybrid Modeにおいてすべての必須基準をクリアしています。
-
-| データセット | モード | 指標 | 必須基準 | 実測値 |
+| データセット (Public) | モード | 指標 | 必須基準 | 実測値 |
 |---|---|---|---|---|
-| ドキュメント | Hybrid | Recall@5 | 80%以上 | **81.0%** *(R@1: 55.0%, R@3: 79.0%, R@10: 86.0%)* |
-| コード | Hybrid | Recall@5 | 50%以上 | **76.8%** *(R@1: 47.5%, R@3: 67.7%, R@10: 83.8%)* |
-| ドキュメント | Lexicalのみ | Recall@5 | - | *71.0% (R@1: 35.0%, R@3: 62.0%, R@10: 81.0%)* |
-| コード | Lexicalのみ | Recall@5 | - | *71.7% (R@1: 46.5%, R@3: 61.6%, R@10: 77.8%)* |
+| ドキュメント | Hybrid | Recall@5 | 80%以上 | **85.0%** *(R@1: 55.0%, R@3: 77.0%, R@10: 91.0%)* |
+| コード | Hybrid | Recall@5 | 50%以上 | **68.7%** *(R@1: 37.4%, R@3: 57.6%, R@10: 79.8%)* |
 
 *注: Lexicalのみのモードでの全コーパスのインデックス作成は1秒未満で完了し、5分の要件を余裕で満たします。Hybridインデックス作成時は、マシンスペックによるメモリ不足（OOM）を防ぐため `--use_multiprocess False` を使用して安全に実行可能です。*
 
